@@ -1,0 +1,305 @@
+{
+  "comment": "TosbiSim support table: read by the host app (pre-root check), the iPhone app (check a phone) and the public support page. Tiers: verified = measured by us; expected = same audio platform as a verified phone; experimental = desk-study candidate or weaker evidence (docs/desk-study); unsupported = rule below. Full voice still needs the in-app call test on every phone. Phones not listed are 'unknown' (Basic mode).",
+  "version": 1,
+  "updated": "2026-10-16",
+  "phones": [
+    {
+      "name": "Galaxy S20 FE",
+      "brand": "Samsung",
+      "models": [
+        "SM-G780G"
+      ],
+      "devices": [
+        "r8q"
+      ],
+      "soc": "Snapdragon 865",
+      "tier": "verified",
+      "profile": "qcom/sm8250-samsung-r8q",
+      "note": "Measured 15 Oct 2026 on G780GXXSHEYJ1 (One UI 5.1, Android 13): calls, SMS, hotspot, two-way call audio.",
+      "note_tr": "15 Ekim 2026'da G780GXXSHEYJ1 (One UI 5.1, Android 13) üzerinde ölçüldü: aramalar, SMS, erişim noktası, iki yönlü arama sesi."
+    },
+    {
+      "name": "Galaxy S20 FE 5G",
+      "brand": "Samsung",
+      "models": [
+        "SM-G781B"
+      ],
+      "devices": [],
+      "soc": "Snapdragon 865",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Same board as the verified S20 FE, but the last firmware checked (Android 12) lacked the in-call music path.",
+      "note_tr": "Doğrulanmış S20 FE ile aynı kart, ancak incelenen son yazılımda (Android 12) arama içi müzik yolu yoktu.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Galaxy A52 4G",
+      "brand": "Samsung",
+      "models": [
+        "SM-A525F"
+      ],
+      "devices": [
+        "a52q"
+      ],
+      "soc": "Snapdragon 720G",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same Qualcomm call-audio controls, in-call music PCM 23 like the S20 FE; TI amp (TAS256x DAC Mute).",
+      "note_tr": "S20 FE ile aynı Qualcomm arama sesi kontrolleri, arama içi müzik PCM 23; TI amfi (TAS256x DAC Mute).",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Galaxy A72",
+      "brand": "Samsung",
+      "models": [
+        "SM-A725F"
+      ],
+      "devices": [
+        "a72q"
+      ],
+      "soc": "Snapdragon 720G",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same platform and audio configs as the Galaxy A52 4G.",
+      "note_tr": "Galaxy A52 4G ile aynı platform ve ses yapılandırması.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Galaxy S21 FE (Snapdragon)",
+      "brand": "Samsung",
+      "models": [
+        "SM-G990B",
+        "SM-G990B2"
+      ],
+      "devices": [
+        "r9q"
+      ],
+      "soc": "Snapdragon 888",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls and the same Cirrus amp mutes as the S20 FE. One UI 8 may hide OEM unlocking: buy one on One UI 7 or older.",
+      "note_tr": "S20 FE ile aynı kontroller ve aynı Cirrus amfi susturmaları. One UI 8 OEM kilidi açmayı gizleyebilir: One UI 7 veya daha eskisini alın.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Galaxy A52s 5G",
+      "brand": "Samsung",
+      "models": [
+        "SM-A528B"
+      ],
+      "devices": [
+        "a52sxq"
+      ],
+      "soc": "Snapdragon 778G",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls, in-call music PCM 23; TI amp like the A52.",
+      "note_tr": "Aynı kontroller, arama içi müzik PCM 23; A52 ile aynı TI amfi.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Redmi Note 9 Pro / 9S",
+      "brand": "Xiaomi",
+      "models": [
+        "Redmi Note 9 Pro",
+        "Redmi Note 9S"
+      ],
+      "devices": [
+        "joyeuse",
+        "curtana"
+      ],
+      "soc": "Snapdragon 720G",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls, in-call music PCM 23. Needs Mi Unlock.",
+      "note_tr": "Aynı kontroller, arama içi müzik PCM 23. Mi Unlock gerekir.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Redmi Note 10 Pro",
+      "brand": "Xiaomi",
+      "models": [
+        "M2101K6G",
+        "M2101K6R"
+      ],
+      "devices": [
+        "sweet"
+      ],
+      "soc": "Snapdragon 732G",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls (confirmed on a Turkish ROM), in-call music PCM 27. Needs Mi Unlock.",
+      "note_tr": "Aynı kontroller (Türkiye yazılımında doğrulandı), arama içi müzik PCM 27. Mi Unlock gerekir.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Redmi Note 10",
+      "brand": "Xiaomi",
+      "models": [
+        "M2101K7AG"
+      ],
+      "devices": [
+        "mojito",
+        "sunny"
+      ],
+      "soc": "Snapdragon 678",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.",
+      "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Redmi Note 11",
+      "brand": "Xiaomi",
+      "models": [
+        "2201117TG",
+        "2201117TY"
+      ],
+      "devices": [
+        "spes",
+        "spesn"
+      ],
+      "soc": "Snapdragon 680",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls, in-call music PCM 23; Awinic amp with speaker/earpiece switches. Needs Mi Unlock.",
+      "note_tr": "Aynı kontroller, arama içi müzik PCM 23; hoparlör/kulaklık anahtarlı Awinic amfi. Mi Unlock gerekir.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "POCO F3",
+      "brand": "Xiaomi",
+      "models": [
+        "M2012K11AG"
+      ],
+      "devices": [
+        "alioth"
+      ],
+      "soc": "Snapdragon 870",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls, in-call music PCM 23; Cirrus amps. Needs Mi Unlock.",
+      "note_tr": "Aynı kontroller, arama içi müzik PCM 23; Cirrus amfiler. Mi Unlock gerekir.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "POCO X3 Pro",
+      "brand": "Xiaomi",
+      "models": [
+        "M2102J20SG"
+      ],
+      "devices": [
+        "vayu"
+      ],
+      "soc": "Snapdragon 860",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.",
+      "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "POCO X3 NFC",
+      "brand": "Xiaomi",
+      "models": [
+        "M2007J20CG"
+      ],
+      "devices": [
+        "surya"
+      ],
+      "soc": "Snapdragon 732G",
+      "tier": "expected",
+      "profile": null,
+      "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.",
+      "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.",
+      "source": "docs/desk-study/expected-list.md"
+    },
+    {
+      "name": "Redmi Note 8",
+      "brand": "Xiaomi",
+      "models": [
+        "Redmi Note 8"
+      ],
+      "devices": [
+        "ginkgo"
+      ],
+      "soc": "Snapdragon 665",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Same Qualcomm call-audio controls as the S20 FE (in-call music on PCM 27). Host silence needs measuring.",
+      "note_tr": "S20 FE ile aynı Qualcomm arama sesi kontrolleri (arama içi müzik PCM 27). Ana cihazın sessizliği ölçülmeli.",
+      "source": "docs/desk-study/redmi-note-8.md"
+    },
+    {
+      "name": "Galaxy A51",
+      "brand": "Samsung",
+      "models": [
+        "SM-A515F"
+      ],
+      "devices": [
+        "a51"
+      ],
+      "soc": "Exynos 9611",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Exynos ABOX routing; call audio needs support that is still being built.",
+      "note_tr": "Exynos ABOX yönlendirmesi; arama sesi için gereken destek hâlâ geliştiriliyor.",
+      "source": "docs/desk-study/galaxy-a51.md"
+    },
+    {
+      "name": "Galaxy A31",
+      "brand": "Samsung",
+      "models": [
+        "SM-A315F",
+        "SM-A315G"
+      ],
+      "devices": [
+        "a31"
+      ],
+      "soc": "MediaTek Helio P65",
+      "tier": "experimental",
+      "profile": null,
+      "note": "MediaTek AFE routing; call audio needs support that is still being built.",
+      "note_tr": "MediaTek AFE yönlendirmesi; arama sesi için gereken destek hâlâ geliştiriliyor.",
+      "source": "docs/desk-study/galaxy-a31.md"
+    }
+  ],
+  "rules": [
+    {
+      "manufacturers": [
+        "huawei",
+        "honor"
+      ],
+      "tier": "unsupported",
+      "reason": "The bootloader can't be unlocked, so the phone can't be rooted.",
+      "reason_tr": "Önyükleyicinin kilidi açılamadığı için telefon root'lanamaz."
+    },
+    {
+      "manufacturers": [
+        "oppo",
+        "realme",
+        "vivo",
+        "iqoo"
+      ],
+      "tier": "unsupported",
+      "reason": "These phones almost never allow bootloader unlocking.",
+      "reason_tr": "Bu telefonlar önyükleyici kilidinin açılmasına neredeyse hiç izin vermez."
+    },
+    {
+      "manufacturers": [
+        "samsung"
+      ],
+      "model_regex": "^SM-[A-Z][0-9]{3,4}[A-Z]?(U|U1|W)$",
+      "tier": "unsupported",
+      "reason": "US and Canadian Samsung models can't be bootloader-unlocked.",
+      "reason_tr": "ABD ve Kanada Samsung modellerinin önyükleyici kilidi açılamaz."
+    },
+    {
+      "min_sdk": 30,
+      "tier": "unsupported",
+      "reason": "Android 11 or newer is needed.",
+      "reason_tr": "Android 11 veya daha yenisi gerekir."
+    }
+  ]
+}

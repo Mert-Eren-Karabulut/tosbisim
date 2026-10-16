@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SIM Relay host (shown to people as "TosbiSim Host"). GPL-3.0-or-later. Turkish: values-tr/strings.xml -->
+<resources>
+    <string name="app_name">TosbiSim Host</string>
+    <string name="notif_channel">TosbiSim Host</string>
+    <string name="notif_text">Relaying calls and texts to your phone</string>
+
+    <string name="ready">Ready</string>
+    <plurals name="steps_to_fix">
+        <item quantity="one">%d step to fix</item>
+        <item quantity="other">%d steps to fix</item>
+    </plurals>
+    <string name="open_pairing">Open pairing</string>
+    <string name="pairing_open">Pairing open (5 min)</string>
+    <string name="host_version">Host app %s</string>
+
+    <string name="step_root">Root and TosbiSim module</string>
+    <string name="root_fail">The root helper isn\'t running. Install Magisk, then the TosbiSim module in Magisk, and restart.</string>
+    <string name="step_system">Installed as a system app</string>
+    <string name="system_ok">Privileged permissions granted</string>
+    <string name="system_fail">Missing %s. Reinstall the module and restart the phone.</string>
+    <string name="step_permissions">Permissions</string>
+    <string name="permissions_ok">Phone, SMS and Bluetooth</string>
+    <string name="permissions_fail">Missing %s. Restart the phone so the module grants them.</string>
+    <string name="step_sms">Default SMS app</string>
+    <string name="sms_ok">Texts are relayed to your phone</string>
+    <string name="sms_fail">Another app receives texts. Restart the phone so the module sets TosbiSim as the SMS app.</string>
+    <string name="step_battery">Battery optimisation</string>
+    <string name="battery_ok">TosbiSim is never put to sleep</string>
+    <string name="battery_warn">The phone may pause TosbiSim. Restart the phone so the module exempts it.</string>
+    <string name="step_bluetooth">Bluetooth</string>
+    <string name="bluetooth_off">Turn Bluetooth on: your phone talks to this host over Bluetooth.</string>
+    <string name="step_phone">Your phone</string>
+    <string name="phone_pairing_open">Pairing is open: open the TosbiSim app on your phone and add this host.</string>
+    <string name="phone_not_paired">Not paired yet. Tap \"Open pairing\" below, then add this host in the TosbiSim app.</string>
+    <string name="phone_connected">%s, connected</string>
+    <string name="phone_away">%s is paired but not in Bluetooth range right now</string>
+    <string name="step_sim">SIM</string>
+    <string name="sim_none">No SIM detected. Insert a SIM (and check it is seated well).</string>
+    <string name="sim_line">SIM %1$d: %2$s</string>
+    <string name="sim_pin">locked, enter its PIN in the TosbiSim app</string>
+    <string name="sim_puk">blocked, enter its PUK in the TosbiSim app</string>
+    <string name="sim_network_lock">locked by the network or carrier</string>
+    <string name="sim_off">switched off</string>
+    <string name="sim_ok">%1$s, signal %2$d/4, VoLTE %3$s</string>
+    <string name="yes">yes</string>
+    <string name="no">no</string>
+    <string name="step_audio">Call audio</string>
+    <string name="audio_full">Full voice: the call test passed on this phone</string>
+    <string name="audio_untested">Ready for the call test: in the TosbiSim app open Host → Call audio and run it with a friend. Until it passes, calls have no audio.</string>
+    <string name="audio_basic">Basic mode: calls ring, are answered and controlled from your phone, texts and hotspot work, but call audio is not relayed. This phone\'s audio path hasn\'t been measured yet.</string>
+    <string name="step_box">Box mode</string>
+    <string name="box_on">On</string>
+    <string name="box_suspended">On, screen allowed until the escape window ends</string>
+    <string name="box_charge">%1$s; charge limit %2$d%%</string>
+    <string name="box_charge_unsupported">%1$s; charge limit %2$d%% (not supported on this phone)</string>
+    <string name="box_off">Off. Turn it on in the TosbiSim app once setup is done: the screen then stays off. To get this screen back later, press Volume Up 3 times, then Volume Down 3 times.</string>
+
+    <!-- compatibility mode (before root) -->
+    <string name="compat_subtitle">Compatibility check for this phone</string>
+    <string name="step_this_phone">This phone</string>
+    <string name="this_phone_detail">%1$s · Android %2$s · %3$s</string>
+    <string name="step_support">TosbiSim support</string>
+    <string name="tier_verified">Verified: the TosbiSim team measured call audio on this phone.</string>
+    <string name="tier_expected">Expected to work: same platform as a verified phone. Call audio switches on after a short call test.</string>
+    <string name="tier_experimental">Experimental: researched but not measured yet. Texts, call control and hotspot should work; call audio needs the call test.</string>
+    <string name="tier_unknown">Not tested yet. Texts, call control and hotspot should work (Basic mode); call audio isn\'t available until this phone is measured.</string>
+    <string name="tier_unsupported">Not supported.</string>
+    <string name="step_boot">Bootloader</string>
+    <string name="boot_unlocked">Unlocked</string>
+    <string name="boot_switch_on">Locked, but OEM unlocking is on: it can be unlocked (this erases the phone).</string>
+    <string name="boot_switch_off">Locked. Turn on Settings → Developer options → OEM unlocking, then unlock the bootloader (this erases the phone).</string>
+    <string name="boot_no">This phone reports that its bootloader can\'t be unlocked.</string>
+    <string name="step_root_magisk">Root (Magisk)</string>
+    <string name="root_ok">Root works</string>
+    <string name="root_magisk">Magisk is installed. Tap \"Check root\" and allow TosbiSim Host when Magisk asks.</string>
+    <string name="root_none">Not rooted yet. Unlock the bootloader, then install Magisk.</string>
+    <string name="root_denied">Root was refused. In Magisk → Superuser, allow TosbiSim Host and try again.</string>
+    <string name="ble_ok">Can advertise to your iPhone</string>
+    <string name="ble_off">Turn Bluetooth on to check</string>
+    <string name="ble_no">This phone can\'t advertise over Bluetooth LE, so your iPhone can\'t connect to it.</string>
+    <string name="btn_check_root">Check root</string>
+    <string name="btn_install">Install TosbiSim Host</string>
+    <string name="btn_installing">Installing…</string>
+    <string name="btn_restart">Restart the phone</string>
+    <string name="install_ok">Installed. Restart the phone to finish.</string>
+    <string name="install_fail">Install failed: %s</string>
+</resources>

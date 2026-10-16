@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TosbiSim Ana Cihaz</string>
+    <string name="notif_channel">TosbiSim Ana Cihaz</string>
+    <string name="notif_text">Aramalar ve mesajlar telefonunuza aktarılıyor</string>
+
+    <string name="ready">Hazır</string>
+    <plurals name="steps_to_fix">
+        <item quantity="one">Düzeltilecek %d adım</item>
+        <item quantity="other">Düzeltilecek %d adım</item>
+    </plurals>
+    <string name="open_pairing">Eşleştirmeyi aç</string>
+    <string name="pairing_open">Eşleştirme açık (5 dk)</string>
+    <string name="host_version">Ana cihaz uygulaması %s</string>
+
+    <string name="step_root">Root ve TosbiSim modülü</string>
+    <string name="root_fail">Root yardımcısı çalışmıyor. Magisk\'i, ardından Magisk içinden TosbiSim modülünü kurun ve yeniden başlatın.</string>
+    <string name="step_system">Sistem uygulaması olarak kurulu</string>
+    <string name="system_ok">Ayrıcalıklı izinler verildi</string>
+    <string name="system_fail">Eksik: %s. Modülü yeniden kurun ve telefonu yeniden başlatın.</string>
+    <string name="step_permissions">İzinler</string>
+    <string name="permissions_ok">Telefon, SMS ve Bluetooth</string>
+    <string name="permissions_fail">Eksik: %s. Modülün izinleri vermesi için telefonu yeniden başlatın.</string>
+    <string name="step_sms">Varsayılan SMS uygulaması</string>
+    <string name="sms_ok">Mesajlar telefonunuza aktarılıyor</string>
+    <string name="sms_fail">Mesajları başka bir uygulama alıyor. Modülün TosbiSim\'i SMS uygulaması yapması için telefonu yeniden başlatın.</string>
+    <string name="step_battery">Pil optimizasyonu</string>
+    <string name="battery_ok">TosbiSim hiçbir zaman uyutulmaz</string>
+    <string name="battery_warn">Telefon TosbiSim\'i duraklatabilir. Modülün muafiyet tanıması için telefonu yeniden başlatın.</string>
+    <string name="step_bluetooth">Bluetooth</string>
+    <string name="bluetooth_off">Bluetooth\'u açın: telefonunuz bu ana cihazla Bluetooth üzerinden konuşur.</string>
+    <string name="step_phone">Telefonunuz</string>
+    <string name="phone_pairing_open">Eşleştirme açık: telefonunuzda TosbiSim uygulamasını açıp bu ana cihazı ekleyin.</string>
+    <string name="phone_not_paired">Henüz eşleşmedi. Aşağıdaki \"Eşleştirmeyi aç\" düğmesine dokunun, ardından bu ana cihazı TosbiSim uygulamasında ekleyin.</string>
+    <string name="phone_connected">%s, bağlı</string>
+    <string name="phone_away">%s eşleşmiş ama şu an Bluetooth menzilinde değil</string>
+    <string name="step_sim">SIM</string>
+    <string name="sim_none">SIM algılanmadı. Bir SIM takın (ve iyi oturduğundan emin olun).</string>
+    <string name="sim_line">SIM %1$d: %2$s</string>
+    <string name="sim_pin">kilitli, PIN kodunu TosbiSim uygulamasında girin</string>
+    <string name="sim_puk">bloke, PUK kodunu TosbiSim uygulamasında girin</string>
+    <string name="sim_network_lock">ağa veya operatöre kilitli</string>
+    <string name="sim_off">kapalı</string>
+    <string name="sim_ok">%1$s, sinyal %2$d/4, VoLTE %3$s</string>
+    <string name="yes">var</string>
+    <string name="no">yok</string>
+    <string name="step_audio">Arama sesi</string>
+    <string name="audio_full">Tam ses: bu telefonda arama testi geçti</string>
+    <string name="audio_untested">Arama testine hazır: TosbiSim uygulamasında Ana Cihaz → Arama sesi bölümünü açıp bir arkadaşınızla testi yapın. Test geçene kadar aramalarda ses olmaz.</string>
+    <string name="audio_basic">Temel mod: aramalar çalar, telefonunuzdan cevaplanır ve yönetilir; mesajlar ve erişim noktası çalışır, ancak arama sesi aktarılmaz. Bu telefonun ses yolu henüz ölçülmedi.</string>
+    <string name="step_box">Kutu modu</string>
+    <string name="box_on">Açık</string>
+    <string name="box_suspended">Açık; kaçış süresi bitene kadar ekran kullanılabilir</string>
+    <string name="box_charge">%1$s; şarj sınırı %%%2$d</string>
+    <string name="box_charge_unsupported">%1$s; şarj sınırı %%%2$d (bu telefonda desteklenmiyor)</string>
+    <string name="box_off">Kapalı. Kurulum bitince TosbiSim uygulamasından açın: ekran o zaman kapalı kalır. Bu ekranı daha sonra geri getirmek için Ses Açma tuşuna 3 kez, ardından Ses Kısma tuşuna 3 kez basın.</string>
+
+    <!-- compatibility mode (before root) -->
+    <string name="compat_subtitle">Bu telefon için uyumluluk kontrolü</string>
+    <string name="step_this_phone">Bu telefon</string>
+    <string name="this_phone_detail">%1$s · Android %2$s · %3$s</string>
+    <string name="step_support">TosbiSim desteği</string>
+    <string name="tier_verified">Doğrulandı: TosbiSim ekibi bu telefonda arama sesini ölçtü.</string>
+    <string name="tier_expected">Çalışması bekleniyor: doğrulanmış bir telefonla aynı platform. Arama sesi kısa bir arama testinden sonra açılır.</string>
+    <string name="tier_experimental">Deneysel: araştırıldı ama henüz ölçülmedi. Mesajlar, arama yönetimi ve erişim noktası çalışmalı; arama sesi için arama testi gerekir.</string>
+    <string name="tier_unknown">Henüz test edilmedi. Mesajlar, arama yönetimi ve erişim noktası çalışmalı (Temel mod); arama sesi bu telefon ölçülene kadar kullanılamaz.</string>
+    <string name="tier_unsupported">Desteklenmiyor.</string>
+    <string name="step_boot">Önyükleyici (bootloader)</string>
+    <string name="boot_unlocked">Kilidi açık</string>
+    <string name="boot_switch_on">Kilitli ama OEM kilidi açma etkin: kilidi açılabilir (bu işlem telefonu sıfırlar).</string>
+    <string name="boot_switch_off">Kilitli. Ayarlar → Geliştirici seçenekleri → OEM kilidi açma\'yı etkinleştirin, ardından önyükleyicinin kilidini açın (bu işlem telefonu sıfırlar).</string>
+    <string name="boot_no">Bu telefon önyükleyicisinin kilidinin açılamayacağını bildiriyor.</string>
+    <string name="step_root_magisk">Root (Magisk)</string>
+    <string name="root_ok">Root çalışıyor</string>
+    <string name="root_magisk">Magisk kurulu. \"Root\'u kontrol et\"e dokunun ve Magisk sorduğunda TosbiSim Ana Cihaz\'a izin verin.</string>
+    <string name="root_none">Henüz root yok. Önyükleyicinin kilidini açın, ardından Magisk\'i kurun.</string>
+    <string name="root_denied">Root reddedildi. Magisk → Süper kullanıcı bölümünden TosbiSim Ana Cihaz\'a izin verip tekrar deneyin.</string>
+    <string name="ble_ok">iPhone\'unuza yayın yapabiliyor</string>
+    <string name="ble_off">Kontrol için Bluetooth\'u açın</string>
+    <string name="ble_no">Bu telefon Bluetooth LE ile yayın yapamıyor; iPhone\'unuz ona bağlanamaz.</string>
+    <string name="btn_check_root">Root\'u kontrol et</string>
+    <string name="btn_install">TosbiSim Ana Cihaz\'ı kur</string>
+    <string name="btn_installing">Kuruluyor…</string>
+    <string name="btn_restart">Telefonu yeniden başlat</string>
+    <string name="install_ok">Kuruldu. Tamamlamak için telefonu yeniden başlatın.</string>
+    <string name="install_fail">Kurulum başarısız: %s</string>
+</resources>

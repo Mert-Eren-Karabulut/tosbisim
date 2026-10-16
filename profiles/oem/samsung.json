@@ -1,0 +1,18 @@
+{
+  "id": "oem/samsung",
+  "comment": "Box-mode settings keys for Samsung One UI (seen on the Galaxy S20 FE, One UI 5.1 / Android 13). Keys a phone lacks are skipped.",
+  "match": {
+    "manufacturer": [
+      "samsung"
+    ]
+  },
+  "box": {
+    "system": {
+      "aod_mode": 0,
+      "aod_tap_to_show_mode": 0,
+      "double_tab_to_wake_up": 0,
+      "lift_to_wake": 0,
+      "master_motion": 0
+    }
+  }
+}

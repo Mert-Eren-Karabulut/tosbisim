@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TosbiSim phones</title>
+<meta name="description" content="Which Android phones work as a TosbiSim host: verified, expected and experimental models.">
+<style>
+:root { --bg:#f6f7f4; --card:#fff; --text:#1c1f1a; --muted:#5d6458; --line:#e3e6df; --accent:#5f8f2f;
+  --verified:#2e7d32; --expected:#1565c0; --experimental:#b26a00; --unsupported:#c62828; --unknown:#6b6b6b; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#121411; --card:#1b1e19; --text:#e9ece5;
+  --muted:#a2a99c; --line:#2c3128; --accent:#8db653; --verified:#66bb6a; --expected:#64b5f6; --experimental:#ffb74d;
+  --unsupported:#ef5350; --unknown:#9e9e9e; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 28px 16px 48px; }
+header { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+header h1 { margin:0; font-size:28px; }
+.logo { font-size:34px; }
+.lang { margin-left:auto; display:flex; gap:4px; }
+.lang button { border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:8px; padding:4px 10px; cursor:pointer; }
+.lang button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); font-weight:600; }
+p.lead { color:var(--muted); margin:10px 0 18px; }
+input[type=search] { width:100%; padding:12px 14px; font-size:16px; border-radius:12px; border:1px solid var(--line);
+  background:var(--card); color:var(--text); }
+.legend { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:8px; margin:16px 0 8px; }
+.legend div { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; font-size:14px; color:var(--muted); }
+h2 { font-size:18px; margin:26px 0 10px; }
+.phone { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin-bottom:8px; }
+.phone .top { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.phone .name { font-weight:600; }
+.phone .meta { color:var(--muted); font-size:13px; }
+.phone .note { font-size:14px; margin-top:4px; }
+.badge { font-size:12px; font-weight:600; padding:2px 8px; border-radius:999px; margin-left:auto; white-space:nowrap; }
+.rules li { margin-bottom:4px; }
+.empty { color:var(--muted); }
+footer { margin-top:32px; color:var(--muted); font-size:13px; }
+a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="logo" aria-hidden="true">🐢</span>
+    <h1 data-t="title"></h1>
+    <div class="lang" role="group" aria-label="Language">
+      <button data-lang="en">English</button><button data-lang="tr">Türkçe</button>
+    </div>
+  </header>
+  <p class="lead" data-t="lead"></p>
+  <input type="search" id="q" autocomplete="off">
+  <div class="legend" id="legend"></div>
+  <div id="list"></div>
+  <h2 data-t="rulesTitle"></h2>
+  <ul class="rules" id="rules"></ul>
+  <footer><span data-t="footer"></span> · <span id="updated"></span> ·
+    <a href="https://github.com/Mert-Eren-Karabulut/tosbisim">GitHub</a></footer>
+</main>
+<script>
+const DATA = {"comment": "TosbiSim support table: read by the host app (pre-root check), the iPhone app (check a phone) and the public support page. Tiers: verified = measured by us; expected = same audio platform as a verified phone; experimental = desk-study candidate or weaker evidence (docs/desk-study); unsupported = rule below. Full voice still needs the in-app call test on every phone. Phones not listed are 'unknown' (Basic mode).", "version": 1, "updated": "2026-10-16", "phones": [{"name": "Galaxy S20 FE", "brand": "Samsung", "models": ["SM-G780G"], "devices": ["r8q"], "soc": "Snapdragon 865", "tier": "verified", "profile": "qcom/sm8250-samsung-r8q", "note": "Measured 15 Oct 2026 on G780GXXSHEYJ1 (One UI 5.1, Android 13): calls, SMS, hotspot, two-way call audio.", "note_tr": "15 Ekim 2026'da G780GXXSHEYJ1 (One UI 5.1, Android 13) üzerinde ölçüldü: aramalar, SMS, erişim noktası, iki yönlü arama sesi."}, {"name": "Galaxy S20 FE 5G", "brand": "Samsung", "models": ["SM-G781B"], "devices": [], "soc": "Snapdragon 865", "tier": "experimental", "profile": null, "note": "Same board as the verified S20 FE, but the last firmware checked (Android 12) lacked the in-call music path.", "note_tr": "Doğrulanmış S20 FE ile aynı kart, ancak incelenen son yazılımda (Android 12) arama içi müzik yolu yoktu.", "source": "docs/desk-study/expected-list.md"}, {"name": "Galaxy A52 4G", "brand": "Samsung", "models": ["SM-A525F"], "devices": ["a52q"], "soc": "Snapdragon 720G", "tier": "expected", "profile": null, "note": "Same Qualcomm call-audio controls, in-call music PCM 23 like the S20 FE; TI amp (TAS256x DAC Mute).", "note_tr": "S20 FE ile aynı Qualcomm arama sesi kontrolleri, arama içi müzik PCM 23; TI amfi (TAS256x DAC Mute).", "source": "docs/desk-study/expected-list.md"}, {"name": "Galaxy A72", "brand": "Samsung", "models": ["SM-A725F"], "devices": ["a72q"], "soc": "Snapdragon 720G", "tier": "expected", "profile": null, "note": "Same platform and audio configs as the Galaxy A52 4G.", "note_tr": "Galaxy A52 4G ile aynı platform ve ses yapılandırması.", "source": "docs/desk-study/expected-list.md"}, {"name": "Galaxy S21 FE (Snapdragon)", "brand": "Samsung", "models": ["SM-G990B", "SM-G990B2"], "devices": ["r9q"], "soc": "Snapdragon 888", "tier": "expected", "profile": null, "note": "Same controls and the same Cirrus amp mutes as the S20 FE. One UI 8 may hide OEM unlocking: buy one on One UI 7 or older.", "note_tr": "S20 FE ile aynı kontroller ve aynı Cirrus amfi susturmaları. One UI 8 OEM kilidi açmayı gizleyebilir: One UI 7 veya daha eskisini alın.", "source": "docs/desk-study/expected-list.md"}, {"name": "Galaxy A52s 5G", "brand": "Samsung", "models": ["SM-A528B"], "devices": ["a52sxq"], "soc": "Snapdragon 778G", "tier": "expected", "profile": null, "note": "Same controls, in-call music PCM 23; TI amp like the A52.", "note_tr": "Aynı kontroller, arama içi müzik PCM 23; A52 ile aynı TI amfi.", "source": "docs/desk-study/expected-list.md"}, {"name": "Redmi Note 9 Pro / 9S", "brand": "Xiaomi", "models": ["Redmi Note 9 Pro", "Redmi Note 9S"], "devices": ["joyeuse", "curtana"], "soc": "Snapdragon 720G", "tier": "expected", "profile": null, "note": "Same controls, in-call music PCM 23. Needs Mi Unlock.", "note_tr": "Aynı kontroller, arama içi müzik PCM 23. Mi Unlock gerekir.", "source": "docs/desk-study/expected-list.md"}, {"name": "Redmi Note 10 Pro", "brand": "Xiaomi", "models": ["M2101K6G", "M2101K6R"], "devices": ["sweet"], "soc": "Snapdragon 732G", "tier": "expected", "profile": null, "note": "Same controls (confirmed on a Turkish ROM), in-call music PCM 27. Needs Mi Unlock.", "note_tr": "Aynı kontroller (Türkiye yazılımında doğrulandı), arama içi müzik PCM 27. Mi Unlock gerekir.", "source": "docs/desk-study/expected-list.md"}, {"name": "Redmi Note 10", "brand": "Xiaomi", "models": ["M2101K7AG"], "devices": ["mojito", "sunny"], "soc": "Snapdragon 678", "tier": "expected", "profile": null, "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.", "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.", "source": "docs/desk-study/expected-list.md"}, {"name": "Redmi Note 11", "brand": "Xiaomi", "models": ["2201117TG", "2201117TY"], "devices": ["spes", "spesn"], "soc": "Snapdragon 680", "tier": "expected", "profile": null, "note": "Same controls, in-call music PCM 23; Awinic amp with speaker/earpiece switches. Needs Mi Unlock.", "note_tr": "Aynı kontroller, arama içi müzik PCM 23; hoparlör/kulaklık anahtarlı Awinic amfi. Mi Unlock gerekir.", "source": "docs/desk-study/expected-list.md"}, {"name": "POCO F3", "brand": "Xiaomi", "models": ["M2012K11AG"], "devices": ["alioth"], "soc": "Snapdragon 870", "tier": "expected", "profile": null, "note": "Same controls, in-call music PCM 23; Cirrus amps. Needs Mi Unlock.", "note_tr": "Aynı kontroller, arama içi müzik PCM 23; Cirrus amfiler. Mi Unlock gerekir.", "source": "docs/desk-study/expected-list.md"}, {"name": "POCO X3 Pro", "brand": "Xiaomi", "models": ["M2102J20SG"], "devices": ["vayu"], "soc": "Snapdragon 860", "tier": "expected", "profile": null, "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.", "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.", "source": "docs/desk-study/expected-list.md"}, {"name": "POCO X3 NFC", "brand": "Xiaomi", "models": ["M2007J20CG"], "devices": ["surya"], "soc": "Snapdragon 732G", "tier": "expected", "profile": null, "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.", "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.", "source": "docs/desk-study/expected-list.md"}, {"name": "Redmi Note 8", "brand": "Xiaomi", "models": ["Redmi Note 8"], "devices": ["ginkgo"], "soc": "Snapdragon 665", "tier": "experimental", "profile": null, "note": "Same Qualcomm call-audio controls as the S20 FE (in-call music on PCM 27). Host silence needs measuring.", "note_tr": "S20 FE ile aynı Qualcomm arama sesi kontrolleri (arama içi müzik PCM 27). Ana cihazın sessizliği ölçülmeli.", "source": "docs/desk-study/redmi-note-8.md"}, {"name": "Galaxy A51", "brand": "Samsung", "models": ["SM-A515F"], "devices": ["a51"], "soc": "Exynos 9611", "tier": "experimental", "profile": null, "note": "Exynos ABOX routing; call audio needs support that is still being built.", "note_tr": "Exynos ABOX yönlendirmesi; arama sesi için gereken destek hâlâ geliştiriliyor.", "source": "docs/desk-study/galaxy-a51.md"}, {"name": "Galaxy A31", "brand": "Samsung", "models": ["SM-A315F", "SM-A315G"], "devices": ["a31"], "soc": "MediaTek Helio P65", "tier": "experimental", "profile": null, "note": "MediaTek AFE routing; call audio needs support that is still being built.", "note_tr": "MediaTek AFE yönlendirmesi; arama sesi için gereken destek hâlâ geliştiriliyor.", "source": "docs/desk-study/galaxy-a31.md"}], "rules": [{"manufacturers": ["huawei", "honor"], "tier": "unsupported", "reason": "The bootloader can't be unlocked, so the phone can't be rooted.", "reason_tr": "Önyükleyicinin kilidi açılamadığı için telefon root'lanamaz."}, {"manufacturers": ["oppo", "realme", "vivo", "iqoo"], "tier": "unsupported", "reason": "These phones almost never allow bootloader unlocking.", "reason_tr": "Bu telefonlar önyükleyici kilidinin açılmasına neredeyse hiç izin vermez."}, {"manufacturers": ["samsung"], "model_regex": "^SM-[A-Z][0-9]{3,4}[A-Z]?(U|U1|W)$", "tier": "unsupported", "reason": "US and Canadian Samsung models can't be bootloader-unlocked.", "reason_tr": "ABD ve Kanada Samsung modellerinin önyükleyici kilidi açılamaz."}, {"min_sdk": 30, "tier": "unsupported", "reason": "Android 11 or newer is needed.", "reason_tr": "Android 11 veya daha yenisi gerekir."}]};
+const T = {
+  en: { title: "Which phones work with TosbiSim?",
+    lead: "TosbiSim turns a spare rooted Android phone into a SIM box for your iPhone. Every phone runs a short call test before call audio turns on; texts, call control and the hotspot work in Basic mode on most rootable Android 11+ phones.",
+    search: "Search a model, e.g. A52 or Redmi Note 10",
+    tiers: { verified: "Verified", expected: "Expected to work", experimental: "Experimental", unsupported: "Not supported" },
+    legend: { verified: "Measured by us on a live call.", expected: "Same audio platform as a verified phone.",
+              experimental: "Researched, not measured yet.", unsupported: "Can't be used as a host." },
+    rulesTitle: "Never supported", none: "Not in the list yet: Basic mode should work; Qualcomm phones can also try the call test.",
+    footer: "Same table as the TosbiSim apps", updated: "updated" },
+  tr: { title: "TosbiSim hangi telefonlarla çalışır?",
+    lead: "TosbiSim, root'lu yedek bir Android telefonu iPhone'unuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve erişim noktası Temel modda çalışır.",
+    search: "Model arayın, ör. A52 veya Redmi Note 10",
+    tiers: { verified: "Doğrulandı", expected: "Çalışması bekleniyor", experimental: "Deneysel", unsupported: "Desteklenmiyor" },
+    legend: { verified: "Canlı aramada bizim tarafımızdan ölçüldü.", expected: "Doğrulanmış bir telefonla aynı ses platformu.",
+              experimental: "Araştırıldı, henüz ölçülmedi.", unsupported: "Ana cihaz olarak kullanılamaz." },
+    rulesTitle: "Hiçbir zaman desteklenmeyenler", none: "Henüz listede yok: Temel mod çalışmalı; Qualcomm telefonlar arama testini de deneyebilir.",
+    footer: "TosbiSim uygulamalarıyla aynı tablo", updated: "güncelleme" } };
+const ORDER = ["verified", "expected", "experimental"];
+let lang = (navigator.language || "en").toLowerCase().startsWith("tr") ? "tr" : "en";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function render() {
+  const t = T[lang];
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach(e => e.textContent = t[e.dataset.t]);
+  document.querySelectorAll(".lang button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lang === lang));
+  $("#q").placeholder = t.search;
+  $("#updated").textContent = t.updated + " " + DATA.updated;
+  $("#legend").innerHTML = [...ORDER, "unsupported"].map(k =>
+    `<div><b style="color:var(--${k})">${t.tiers[k]}</b><br>${t.legend[k]}</div>`).join("");
+  const q = $("#q").value.trim().toLowerCase();
+  const hit = p => !q || [p.brand, p.name, p.soc, ...p.models].join(" ").toLowerCase().includes(q);
+  let html = "";
+  for (const tier of ORDER) {
+    const phones = DATA.phones.filter(p => p.tier === tier && hit(p));
+    if (!phones.length) continue;
+    html += `<h2 style="color:var(--${tier})">${t.tiers[tier]}</h2>`;
+    for (const p of phones) {
+      const note = lang === "tr" ? (p.note_tr || p.note) : p.note;
+      html += `<div class="phone"><div class="top"><span class="name">${esc(p.brand)} ${esc(p.name)}</span>
+        <span class="meta">${esc(p.models.join(", "))} · ${esc(p.soc)}</span>
+        <span class="badge" style="color:var(--${tier});border:1px solid var(--${tier})">${t.tiers[tier]}</span></div>
+        <div class="note">${esc(note)}</div></div>`;
+    }
+  }
+  $("#list").innerHTML = html || `<p class="empty">${t.none}</p>`;
+  $("#rules").innerHTML = DATA.rules.map(r => `<li>${esc(lang === "tr" ? (r.reason_tr || r.reason) : r.reason)}</li>`).join("");
+}
+document.querySelectorAll(".lang button").forEach(b => b.onclick = () => { lang = b.dataset.lang; render(); });
+$("#q").oninput = render;
+render();
+</script>
+</body>
+</html>

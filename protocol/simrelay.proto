@@ -1,0 +1,262 @@
+// SIM Relay host <-> client protocol, v1. MIT licensed (see LICENSE) so the GPL host and the
+// proprietary client can both compile it. Transport and framing: README.md in this folder.
+syntax = "proto3";
+
+package simrelay.v1;
+
+option java_package = "dev.simrelay.protocol.v1";
+option java_multiple_files = true;
+option swift_prefix = "SR";
+
+message Envelope {
+  uint32 seq = 1;        // per-sender, per-connection, starts at 1
+  uint32 reply_to = 2;   // seq of the request this answers, 0 if none
+  oneof body {
+    Hello hello = 10;
+    HostStatus host_status = 11;
+    KeepAlive keep_alive = 12;
+    Error error = 13;
+
+    CallEvent call_event = 20;     // host -> client
+    CallAction call_action = 21;   // client -> host
+    Dial dial = 22;                // client -> host
+
+    SmsReceived sms_received = 30; // host -> client (store-and-forward until SmsAck)
+    SmsAck sms_ack = 31;           // client -> host
+    SmsSend sms_send = 32;         // client -> host
+    SmsSendResult sms_send_result = 33;
+
+    SetHotspot set_hotspot = 40;   // client -> host
+    SetHotspotConfig set_hotspot_config = 41; // client -> host
+    SetSim set_sim = 42;           // client -> host: per-SIM settings
+    UnlockSim unlock_sim = 43;     // client -> host: SIM PIN / PUK
+    UnlockSimResult unlock_sim_result = 44; // host -> client
+    SetBox set_box = 45;           // client -> host: box mode / charge limit
+    VoiceTestCheck voice_test_check = 46;          // client -> host: during the test call, how did audio flow?
+    VoiceTestHostResult voice_test_host_result = 47; // host -> client
+    VoiceTestVerdict voice_test_verdict = 48;      // client -> host: the user's answers; pass turns full voice on
+    AudioChannel audio_channel = 50; // M5: open/close the L2CAP audio channel
+  }
+}
+
+// First message from each side after the control channel is up.
+message Hello {
+  uint32 protocol_version = 1;   // 1
+  string app_version = 2;
+  string device_model = 3;
+  string install_id = 4;         // client: stable random id, pinned by the host at pairing
+}
+
+message Sim {
+  int32 slot = 1;                // 0-based SIM slot index on the host
+  string number_e164 = 2;        // own number if the SIM exposes it, else empty
+  string operator_name = 3;
+  string country_iso = 4;        // e.g. "tr", "gb": lets the client normalise numbers for Contacts
+  bool enabled = 5;              // false = switched off from the client (no calls/SMS on this line)
+  int32 signal_level = 6;        // 0..4
+  bool volte = 7;                // voice over LTE/NR available (best effort)
+  bool roaming = 8;              // currently roaming
+  bool data_roaming = 9;         // data roaming allowed (off by default: cost protection)
+  bool default_data = 10;        // this SIM carries mobile data / the hotspot
+  string carrier_id = 11;        // stable per SIM card (MCC+MNC+ICCID hash): lets the client keep a nickname
+  Lock lock = 12;                // SIM PIN state
+  int32 attempts_left = 13;      // PIN (or PUK when lock = PUK_REQUIRED) attempts left; -1 = unknown
+  enum Lock { UNLOCKED = 0; PIN_REQUIRED = 1; PUK_REQUIRED = 2; PERM_DISABLED = 3; OTHER_LOCK = 4; }
+}
+
+// SIM PIN entry from the client. With a PUK, `pin` is the new PIN to set.
+message UnlockSim {
+  int32 slot = 1;
+  string pin = 2;
+  string puk = 3;
+}
+
+message UnlockSimResult {
+  int32 slot = 1;
+  bool ok = 2;
+  int32 attempts_left = 3;       // after this attempt; -1 = unknown
+  Sim.Lock lock = 4;             // state after this attempt
+}
+
+message HostStatus {
+  int32 battery_percent = 1;
+  bool charging = 2;
+  int32 signal_level = 3;        // 0..4
+  bool volte_registered = 4;
+  bool hotspot_on = 5;
+  VoiceTier voice_tier = 6;
+  repeated Sim sims = 7;
+  Hotspot hotspot = 8;           // supersedes hotspot_on when present
+  Box box = 9;
+  VoiceStatus voice = 10;
+  enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
+}
+
+// Call audio on this host. Full voice (voice_tier FULL_VOICE) only after the guided call test passed on this phone
+// and firmware build, whatever the support tier (full voice only where it is measured).
+message VoiceStatus {
+  string support_tier = 1;       // verified / expected / experimental / unknown / unsupported (profiles/support.json)
+  string device_name = 2;
+  string profile_source = 3;     // measured / candidate / auto / "" (no way to relay audio on this phone yet)
+  string profile_id = 4;
+  bool can_test = 5;             // a profile exists, so the call test can run
+  bool passed = 6;               // test passed on this firmware build
+  int64 passed_ms = 7;
+  string firmware = 8;           // build fingerprint the result belongs to
+}
+
+message VoiceTestCheck {}
+
+// What the host measured since the test call's audio started.
+message VoiceTestHostResult {
+  bool in_call = 1;              // routes applied for the call
+  int32 silence_controls = 2;    // host amp/earpiece controls held silent (0 = none known for this phone)
+  int32 captured_frames = 3;     // 10 ms frames read from the call downlink
+  int32 voiced_frames = 4;       // ... with speech-level audio (the friend talking)
+  int32 sent_frames = 5;         // ... sent to the iPhone
+  int32 played_frames = 6;       // iPhone audio frames played into the call uplink
+  int32 peak = 7;                // loudest downlink sample
+  string profile_id = 8;
+  string profile_source = 9;
+}
+
+message VoiceTestVerdict {
+  bool heard_caller = 1;         // iPhone heard the friend (also measured)
+  bool caller_heard_us = 2;      // the friend heard the iPhone user clearly
+  bool echo = 3;                 // the friend heard an echo / the host's surroundings
+  HostSound host_sound = 4;
+  bool passed = 5;
+  enum HostSound { HOST_SOUND_UNKNOWN = 0; SILENT = 1; MADE_SOUND = 2; }
+}
+
+// Box mode: the host as a silent, screen-off box (display kept off, no call screen, radio savings), plus the
+// charge limit. What this phone supports is reported so the client only offers what works.
+message Box {
+  bool on = 1;
+  bool suspended = 2;            // escape gesture used: screen usable until suspended_until_ms, then back on
+  int64 suspended_until_ms = 3;
+  int32 charge_limit = 4;        // percent: 60 / 80 / 100
+  bool charge_limit_supported = 5;
+  bool call_screen_hidden = 6;   // host app holds the dialer role (no OEM in-call screen)
+  int32 battery_health = 7;      // unused: kernels report design capacity as full capacity, so it was misleading
+}
+
+message SetBox {
+  optional bool on = 1;
+  optional int32 charge_limit = 2;
+}
+
+// The host's Wi-Fi hotspot. The passphrase only travels over the bonded, encrypted BLE link,
+// so the client can join with one tap.
+message Hotspot {
+  bool supported = 1;
+  bool on = 2;
+  string ssid = 3;
+  string passphrase = 4;
+  Band band = 5;
+  bool hidden = 6;               // privacy only: hidden networks still beacon, no battery saving
+  Security security = 7;
+  int32 max_clients = 8;         // 0 = no limit set
+  bool auto_off = 9;             // turn off when no device is connected (the real battery saver)
+  int32 auto_off_minutes = 10;
+  repeated Client clients = 11;  // currently connected devices (status only)
+  Capabilities capabilities = 12; // what this host phone can do (status only)
+  Usage usage = 13;              // data shared through the hotspot, counted on the host (status only)
+
+  enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
+  enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
+  message Client { string name = 1; string mac = 2; }
+  message Usage {
+    int64 session_down = 1;      // bytes to connected devices since the hotspot last turned on
+    int64 session_up = 2;        // bytes from connected devices
+    int64 today = 3;             // down + up, calendar day (host time zone)
+    int64 month = 4;             // down + up, calendar month
+  }
+  message Capabilities {
+    repeated Band bands = 1;
+    repeated Security securities = 2;
+    bool hidden_ssid = 3;
+    bool max_clients = 4;
+    bool auto_off = 5;
+  }
+}
+
+// Fields of Hotspot that the client may change: ssid, passphrase, band, hidden, security, max_clients,
+// auto_off, auto_off_minutes. The host applies them and restarts the hotspot if it was on.
+message SetHotspotConfig { Hotspot config = 1; }
+
+message KeepAlive { uint32 n = 1; }
+
+message Error {
+  Code code = 1;
+  string detail = 2;
+  // HELLO_REQUIRED: the host doesn't know this link yet (its app restarted while the BLE link stayed up):
+  // the client re-subscribes and says Hello again. NOT_PAIRED is only for a Hello with an unknown install_id.
+  enum Code { CODE_UNSPECIFIED = 0; NOT_PAIRED = 1; BAD_REQUEST = 2; NO_SUCH_CALL = 3; NO_SERVICE = 4; INTERNAL = 5;
+              HELLO_REQUIRED = 6; }
+}
+
+message CallEvent {
+  string call_id = 1;            // host-assigned, stable for the call's lifetime
+  State state = 2;
+  bool incoming = 3;
+  string number_raw = 4;         // as the network gave it
+  string number_e164 = 5;        // normalised with the SIM's country; empty if not possible/withheld
+  bool number_withheld = 6;
+  int32 slot = 7;
+  int64 state_since_ms = 8;      // host wall clock
+  DisconnectCause cause = 9;     // set when state == ENDED
+  string client_call_uuid = 10;  // echoes Dial.client_call_uuid for calls the client started
+  enum State { STATE_UNSPECIFIED = 0; RINGING = 1; DIALING = 2; ACTIVE = 3; HOLDING = 4; ENDED = 5; }
+  enum DisconnectCause { CAUSE_UNSPECIFIED = 0; LOCAL = 1; REMOTE = 2; REJECTED = 3; MISSED = 4; BUSY = 5; ERROR = 6; }
+}
+
+message CallAction {
+  string call_id = 1;
+  Action action = 2;
+  enum Action { ACTION_UNSPECIFIED = 0; ANSWER = 1; REJECT = 2; HANG_UP = 3; HOLD = 4; UNHOLD = 5; DTMF = 6; }
+  string dtmf = 3;               // for DTMF: one of 0-9 * # A-D
+}
+
+message Dial {
+  string number = 1;             // as dialled; host normalises
+  int32 slot = 2;                // -1 = host default
+  string client_call_uuid = 3;   // CallKit UUID, echoed in CallEvent
+  bool voice_test = 4;           // the guided call test: relay audio even though full voice isn't on yet
+}
+
+message SmsReceived {
+  string id = 1;                 // host-assigned; resent until acked
+  string from_raw = 2;
+  string from_e164 = 3;
+  string body = 4;
+  int64 received_ms = 5;
+  int32 slot = 6;
+}
+
+message SmsAck { string id = 1; }
+
+message SmsSend {
+  string client_msg_id = 1;
+  string to = 2;
+  string body = 3;
+  int32 slot = 4;                // -1 = host default
+}
+
+message SmsSendResult {
+  string client_msg_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message SetHotspot { bool on = 1; }
+
+// Per-SIM settings from the client. Only the fields that are present are changed.
+message SetSim {
+  int32 slot = 1;
+  optional bool enabled = 2;       // turn the line off/on (UICC applications)
+  optional bool data_roaming = 3;
+  bool make_default_data = 4;      // route mobile data (and the hotspot) through this SIM
+}
+
+message AudioChannel { bool open = 1; }

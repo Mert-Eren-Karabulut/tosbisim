@@ -1,0 +1,6 @@
+id=simrelay-host
+name=TosbiSim Host
+version=0.8.0-rollout
+versionCode=21
+author=SIM Relay authors
+description=Relays this phone's SIM calls/SMS to your main phone. Installs the host app as a privileged app, runs the simrelayd audio daemon and keeps the phone silent.
