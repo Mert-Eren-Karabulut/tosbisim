@@ -44,6 +44,11 @@ object Box {
     private const val DIALER_ROLE = "android.app.role.DIALER"
     private const val REASON_POWER = 1                  // TelephonyManager.ALLOWED_NETWORK_TYPES_REASON_POWER
     private const val BITMASK_NR = 1L shl 19            // TelephonyManager.NETWORK_TYPE_BITMASK_NR
+    private const val BITMASK_LTE = (1L shl 12) or (1L shl 18)   // NETWORK_TYPE_BITMASK_LTE | _LTE_CA
+
+    /** The mask without 5G, or [mask] itself when that would leave no LTE (a "5G only" choice would become "no
+     *  radio": no calls, no texts; audit, 19 Oct). */
+    private fun withoutNr(mask: Long): Long = (mask and BITMASK_NR.inv()).let { if (it and BITMASK_LTE == 0L) mask else it }
     const val DEFAULT_CHARGE_LIMIT = 80
     private val NET_BLOCK = listOf("com.google.android.gms", "com.android.vending")
 
@@ -239,7 +244,7 @@ object Box {
             val set = TelephonyManager::class.java.getMethod("setAllowedNetworkTypesForReason", Int::class.java, Long::class.java)
             val get = TelephonyManager::class.java.getMethod("getAllowedNetworkTypesForReason", Int::class.java)
             val user = get.invoke(tm, 0) as Long                 // REASON_USER: what the user allows
-            set.invoke(tm, REASON_POWER, if (lteOnly) user and BITMASK_NR.inv() else user)
+            set.invoke(tm, REASON_POWER, if (lteOnly) withoutNr(user) else user)
             Log.i(TAG, "box: slot ${info.simSlotIndex} ${if (lteOnly) "LTE only (idle)" else "5G allowed"}")
         }.onFailure { Log.w(TAG, "box: network types failed: ${it.cause ?: it}") }
     }
@@ -254,7 +259,7 @@ object Box {
         val cur = c.getMethod("getAllowedNetworkTypes").invoke(tm) as Long
         val target = if (lteOnly) {
             if (!prefs.contains(key)) prefs.edit().putLong(key, cur).apply()
-            cur and BITMASK_NR.inv()
+            withoutNr(cur)
         } else prefs.getLong(key, cur or BITMASK_NR).also { prefs.edit().remove(key).apply() }
         c.getMethod("setAllowedNetworkTypes", Long::class.java).invoke(tm, target)
         Log.i(TAG, "box: slot $slot ${if (lteOnly) "LTE only (idle)" else "5G allowed"} (Android 11)")
@@ -266,7 +271,7 @@ class DaemonEventReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             "dev.simrelay.host.BOX_ESCAPE" -> runCatching { Box.escape() }
-            "dev.simrelay.host.DAEMON_UP" -> Daemon.reconnect()
+            "dev.simrelay.host.DAEMON_UP" -> { HostService.ensure(ctx); Daemon.reconnect() }
         }
     }
 }

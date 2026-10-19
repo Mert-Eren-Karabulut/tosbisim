@@ -35,7 +35,7 @@ object HostWifi {
 
     private lateinit var app: Context
     private val main = Handler(Looper.getMainLooper())
-    private val exec = Executors.newSingleThreadExecutor()
+    private val exec = Bg.single("host-wifi")
     private lateinit var near: () -> Boolean
     private lateinit var inCall: () -> Boolean
     private lateinit var paired: () -> Boolean

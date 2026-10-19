@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.12.2",
+    "code": 38,
+    "en": "Pairing is simpler: \"Add host\" on the iPhone lists only hosts ready to pair, and a host with no iPhone is always ready. Hosts keep one Bluetooth address, so a host just picked can't vanish, and Android 13+ hosts accept pairing on their own.\nMuch harder to break: audio settings are checked before they are written, and after a crash while writing them the host stays safe for that boot; the host restarts itself if it ever stops; Bluetooth switched off comes back on; the power button is only blocked when the escape gesture works; the charge limit can never leave the battery draining.\nA screen-lock warning: with a PIN, the host can't start after a restart.",
+    "tr": "Eşleştirme daha kolay: iPhone'daki \"Ana cihaz ekle\" yalnızca eşleştirmeye hazır ana cihazları listeler; iPhone'u olmayan bir ana cihaz her zaman hazırdır. Ana cihazlar tek bir Bluetooth adresi kullanır, bu yüzden yeni seçilen bir ana cihaz kaybolmaz; Android 13 ve üstü ana cihazlar eşleştirmeyi kendiliğinden kabul eder.\nÇok daha dayanıklı: ses ayarları yazılmadan önce denetlenir ve yazarken bir çökme olursa ana cihaz o açılışta güvenli modda kalır; ana cihaz durursa kendini yeniden başlatır; kapatılan Bluetooth yeniden açılır; güç düğmesi yalnızca kaçış hareketi çalışıyorsa engellenir; şarj sınırı pili asla boşaltmaz.\nEkran kilidi uyarısı: PIN varken ana cihaz yeniden başlatmadan sonra çalışamaz."
+  },
+  {
+    "version": "0.12.1",
+    "code": 37,
+    "en": "Forgetting this host on the iPhone now unpairs it here too, so it can be paired again (or to another iPhone) without leftovers. The paired iPhone can pair again on its own after iOS lost its Bluetooth keys.\nSetup: \"Pair a different iPhone\" is available until setup ends. Android 11 phones no longer show a Fix card that could never clear.\nThe saved log restarts by itself if it stops being written.",
+    "tr": "iPhone'da bu ana cihazı unutmak artık eşleştirmeyi burada da kaldırıyor; böylece yeniden (ya da başka bir iPhone ile) sorunsuz eşleştirilebilir. Eşli iPhone, iOS Bluetooth anahtarlarını kaybettiğinde kendiliğinden yeniden eşleşebilir.\nKurulum: \"Başka bir iPhone eşleştir\" kurulum bitene kadar kullanılabilir. Android 11 telefonlarda artık hiç kapanmayan bir Düzelt kartı görünmüyor.\nKayıt dosyası yazılmayı bırakırsa kendiliğinden yeniden başlıyor."
+  },
+  {
     "version": "0.12.0",
     "code": 36,
     "en": "Setup, step by step: the screen shows one next step at a time (root, install, restart, pairing), remembers where you were, and tells apart \"restart needed\" from a module that didn't start. Fix puts back missing permissions without a restart.\nAnonymous diagnostics: setup steps, failures and call-test results are sent with the phone's model and a log with numbers, names and addresses removed, so we can tell which phones work. One switch on the setup screen turns them off.\nThe iPhone's Report a problem can include this phone's log.",

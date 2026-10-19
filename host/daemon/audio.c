@@ -555,7 +555,10 @@ static void *playback_main(void *arg) {
     int period = base * drate / 48000;
     struct pcm *pcm = pcm_hold(LIVE_PLAY, open_pcm(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)period));
     for (int tries = 1; !pcm && g_call_running; tries++) {     // the voice path may not be up yet: retry, don't give up
-        struct timespec wait = { .tv_nsec = 200 * 1000 * 1000 };
+        // Quick at first (audio must start as the call connects), then easing off: a voice path that never opens
+        // must not be hit 5 times a second for a whole call (an open/close storm on the audio DSP rebooted a phone).
+        struct timespec wait = { .tv_sec = tries > 85 ? 1 : 0,
+                                 .tv_nsec = tries > 85 ? 0 : tries > 25 ? 500 * 1000 * 1000 : 200 * 1000 * 1000 };
         nanosleep(&wait, NULL);
         // The voice path's constraints appear once the modem side runs: ask again, follow a changed rate.
         int r2 = drate, c2 = ich;

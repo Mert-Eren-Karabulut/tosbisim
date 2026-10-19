@@ -21,7 +21,8 @@ object Diag {
     private const val PER_DAY = 30
     private const val REPEAT_MS = 6 * 3600_000L
     private const val LOG_BYTES = 12_000
-    private val exec = Executors.newSingleThreadExecutor { Thread(it, "diag").apply { isDaemon = true } }
+    private val exec: java.util.concurrent.Executor = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "diag").apply { isDaemon = true } }
+        .let { ex -> java.util.concurrent.Executor { r -> ex.execute { try { r.run() } catch (t: Throwable) { Log.e(TAG, "diag: $t") } } } }
     private lateinit var app: Context
 
     fun init(ctx: Context) {

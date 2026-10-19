@@ -74,6 +74,13 @@
     <string name="pair_body">On your iPhone: install TosbiSim, open it, tap Add host, choose \"%1$s\", then tap Pair when iOS asks.</string>
     <string name="pair_open_left">Pairing is open for %s.</string>
     <string name="pair_closed">Pairing is closed.</string>
+    <string name="c_lock">Screen lock</string>
+    <string name="lock_on">PIN, pattern or password set: TosbiSim can\'t start after a restart until someone unlocks this phone</string>
+    <string name="lock_off">None: TosbiSim starts by itself after a restart</string>
+    <string name="lock_title">Remove the screen lock</string>
+    <string name="lock_body">With a PIN, pattern or password, Android keeps TosbiSim locked after every restart or power cut until someone unlocks the phone, and on a phone kept in a drawer nobody will. Set the screen lock to None (or Swipe).</string>
+    <string name="btn_lock_settings">Open screen lock settings</string>
+    <string name="pair_ready">Ready to pair: the first iPhone that adds this host gets it.</string>
     <string name="btn_open_pairing">Open pairing (5 min)</string>
     <string name="next_title">Continue on your iPhone</string>
     <string name="next_test">Paired with %1$s. Next, in TosbiSim on the iPhone: Host → Call audio → Run the call test. Call a friend, and keep this phone next to you to hear whether it makes any sound.</string>

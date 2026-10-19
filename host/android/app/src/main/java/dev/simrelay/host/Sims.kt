@@ -120,13 +120,24 @@ object Sims {
             else -> Sim.Lock.UNLOCKED
         }
 
-    /** Attempts left; asked once per lock with an empty PIN/PUK, exactly as AOSP's keyguard does (no attempt used). */
+    /**
+     * Attempts left; asked once per lock with an empty PIN/PUK, exactly as AOSP's keyguard does (no attempt used).
+     * The modem call can take seconds and status is built on the main thread (an ANR risk, audit 19 Oct): the first
+     * status says "unknown", the answer comes off the main thread and [attemptsKnown] sends a fresh status.
+     */
+    @Volatile var attemptsKnown: () -> Unit = {}
+    private val asking = java.util.Collections.synchronizedSet(HashSet<Int>())
     private fun attemptsFor(ctx: Context, slot: Int, lock: Sim.Lock): Int {
         if (lock != Sim.Lock.PIN_REQUIRED && lock != Sim.Lock.PUK_REQUIRED) return -1
-        return attempts.getOrPut(slot) {
-            val r = supply(ctx, slot, if (lock == Sim.Lock.PUK_REQUIRED) "" else null, "")
-            r?.second ?: -1
+        attempts[slot]?.let { return it }
+        if (asking.add(slot)) imsExec.execute {
+            try {
+                val r = supply(ctx, slot, if (lock == Sim.Lock.PUK_REQUIRED) "" else null, "")
+                attempts[slot] = r?.second ?: -1
+            } finally { asking.remove(slot) }
+            attemptsKnown()
         }
+        return -1
     }
 
     /** Client PIN (or PUK + new PIN). Runs the modem call off the main thread; never logs the codes. */
@@ -250,7 +261,7 @@ object Sims {
         cached?.first ?: false
     }.getOrElse { android.util.Log.w("SimRelayHost", "VoLTE check sub $sub: $it"); false }
 
-    private val imsExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val imsExec = Bg.single("ims")
     private val imsCache = java.util.concurrent.ConcurrentHashMap<Int, Pair<Boolean, Long>>()
 
     @SuppressLint("MissingPermission")

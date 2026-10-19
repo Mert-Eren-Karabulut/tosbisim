@@ -20,7 +20,7 @@ import java.util.concurrent.Executors
  */
 object Daemon {
     private const val TAG = "SimRelayHost"
-    private val exec = Executors.newSingleThreadExecutor { Thread(it, "daemon-client") }
+    private val exec = Bg.single("daemon-client", daemon = false)
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     // A daemon stuck in one command (it joins audio threads at CALL_END: up to ~10 s) must not hold every later
     // command forever: the read gives up, the request reconnects (CALL_START is re-sent if a call is on).
@@ -134,6 +134,10 @@ object Daemon {
             reader = BufferedReader(InputStreamReader(s.inputStream))
             out = s.outputStream
             send("HELLO")
+            // Safe mode: the daemon found that the last boot ended while it was writing audio controls (a kernel crash
+            // from a wrong control, most likely). It writes none this boot; we want to know which phone and profile.
+            if (send("STATUS")?.contains("safe=1") == true)
+                Diag.event("daemon_safe_mode", org.json.JSONObject().put("what", "crash while writing").put("profile", p?.id ?: ""))
             // No shipped profile: try one from the phone's own audio files once (the call test still decides).
             if (p == null && !autoTried) {
                 autoTried = true

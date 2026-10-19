@@ -69,6 +69,13 @@
     <string name="pair_body">iPhone\'unuzda: TosbiSim\'i kurup açın, Ana cihaz ekle\'ye dokunun, \"%1$s\" seçin ve iOS sorduğunda onaylayın.</string>
     <string name="pair_open_left">Eşleştirme %s daha açık.</string>
     <string name="pair_closed">Eşleştirme kapalı.</string>
+    <string name="c_lock">Ekran kilidi</string>
+    <string name="lock_on">PIN, desen veya şifre var: TosbiSim yeniden başlatmadan sonra biri bu telefonun kilidini açana kadar başlayamaz</string>
+    <string name="lock_off">Yok: TosbiSim yeniden başlatmadan sonra kendiliğinden başlar</string>
+    <string name="lock_title">Ekran kilidini kaldırın</string>
+    <string name="lock_body">PIN, desen veya şifre varken Android, her yeniden başlatma veya elektrik kesintisinden sonra telefonun kilidi açılana kadar TosbiSim\'i kilitli tutar; çekmecedeki bir telefonun kilidini de kimse açmaz. Ekran kilidini Yok (veya Kaydırma) yapın.</string>
+    <string name="btn_lock_settings">Ekran kilidi ayarlarını aç</string>
+    <string name="pair_ready">Eşleştirmeye hazır: bu ana cihazı ilk ekleyen iPhone onu alır.</string>
     <string name="btn_open_pairing">Eşleştirmeyi aç (5 dk)</string>
     <string name="next_title">iPhone\'da devam edin</string>
     <string name="next_test">%1$s ile eşleşti. Sıradaki adım, iPhone\'daki TosbiSim\'de: Ana cihaz → Arama sesi → Arama testini başlat. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>

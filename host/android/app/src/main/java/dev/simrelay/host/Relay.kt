@@ -15,6 +15,7 @@ import dev.simrelay.protocol.v1.CallEvent
 import dev.simrelay.protocol.v1.Envelope
 import dev.simrelay.protocol.v1.Error
 import dev.simrelay.protocol.v1.Hello
+import dev.simrelay.protocol.v1.Unpair
 import dev.simrelay.protocol.v1.HostStatus
 import dev.simrelay.protocol.v1.Sim
 import dev.simrelay.protocol.v1.Uplink
@@ -63,15 +64,21 @@ object Relay {
     @Volatile private var pairingUntil = 0L
     private var kaN = 0
     private var lastHotspotOn = false
-    private val pairExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val pairExec = Bg.single("pairing")
 
+    private var relayStarted = false
+
+    /** Once per process: a second start (the service recreated in a live process) would build a second GATT server,
+     *  advertising set and audio bridge. */
     fun start(ctx: Context) {
+        if (relayStarted) return
+        relayStarted = true
         app = ctx.applicationContext
         CallRegistry.init(app)
         VoiceGate.init(app)
         Api.refreshSupportTable(app)          // newest phone tiers from api.tosbisim.com (bundled copy as fallback)
         if (pinned() == null) openPairing(FIRST_PAIRING_WINDOW_MS)
-        ble = BleLink(app, ::onFrame, ::onLink)
+        ble = BleLink(app, ::onFrame, ::onLink, ::pairable)
         ble.onServiceReady = { askForHello() }
         ble.start()
         val adapter = (app.getSystemService(android.content.Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager).adapter
@@ -108,19 +115,24 @@ object Relay {
         Hotspot.watch(app, statusChanged)
         HostWifi.start(app, near = ::bleNear, inCall = { CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED } },
             paired = { pinned() != null }, hotspotOn = { Hotspot.isOn(app) }, changed = statusChanged)
-        // Pairing window open: accept Bluetooth pairing by ourselves (headless hosts can't tap "Pair"). The Hello pin
-        // still decides who is served; outside the window Android handles requests as usual.
+        // Pairing window open: accept Bluetooth pairing by ourselves (headless hosts can't tap "Pair"). Also the paired
+        // iPhone pairing again after iOS dropped its keys (accessory removed, network settings reset): with no screen,
+        // nobody could tap "Pair" and the iPhone hung at "Connecting" (19 Oct). The Hello pin still decides who is
+        // served; other requests outside the window are left to Android.
         app.registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context, i: android.content.Intent) {
-                if (!pairingOpen()) return
                 val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
                 val mac = dev.address
+                val known = pinned() != null && mac == app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
+                if (!pairable() && !known) return
+                if (known && !pairable()) Log.i(TAG, "pairing request from the paired iPhone (its keys were reset): accepting")
                 pairExec.execute { RootBt.confirm(app, mac) }
             }
         }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
         Sims.protectNewSims(app)
         Sims.log(app)
         Sims.watch(app) { Sims.protectNewSims(app); Sims.log(app); statusChanged() }
+        Sims.attemptsKnown = { main.post { statusChanged() } }
         main.postDelayed(keepAlive, KEEPALIVE_MS)
         main.postDelayed({ guardSmsRole() }, 20_000)   // after the daemon is up (service.sh claims it 90 s after boot too)
         Log.i(TAG, "relay up; pinned client=${pinned() ?: "none"}")
@@ -141,10 +153,21 @@ object Relay {
     fun pairingOpen(): Boolean = SystemClock.elapsedRealtime() < pairingUntil
     fun pairingSecondsLeft(): Int = ((pairingUntil - SystemClock.elapsedRealtime()) / 1000).coerceAtLeast(0).toInt()
 
+    /**
+     * An iPhone may pair now: the window is open, or no iPhone is paired (a new host, or one its iPhone forgot: no
+     * pairing button to find on a phone without a screen). Hosts say so in their advertisement, and the iPhone's
+     * "Add host" sheet lists only those, so a host paired to someone else never shows up there (19 Oct).
+     */
+    fun pairable(): Boolean = pinned() == null || pairingOpen()
+
     fun openPairing(ms: Long = PAIRING_WINDOW_MS) {
         pairingUntil = SystemClock.elapsedRealtime() + ms
         Log.i(TAG, "pairing window open for ${ms / 1000} s")
+        pairableChanged()
+        main.postDelayed({ pairableChanged() }, ms + 500)       // the window closes by itself
     }
+
+    private fun pairableChanged() { if (::ble.isInitialized) ble.refreshAdvertising() }
 
     // ------------------------------------------------------------- host -> client
 
@@ -152,7 +175,7 @@ object Relay {
         // Fast BLE link while any call is ringing/dialing/active (alert latency + audio), relaxed when idle.
         if (::ble.isInitialized) {
             val othersLive = CallRegistry.snapshot().any { it.callId != e.callId && it.state != CallEvent.State.ENDED }
-            ble.setCallPriority(e.state != CallEvent.State.ENDED || othersLive)
+            runCatching { ble.setCallPriority(e.state != CallEvent.State.ENDED || othersLive) }
         }
         Log.i(TAG, "call ${e.callId.take(8)} ${e.state} incoming=${e.incoming} slot=${e.slot} cause=${e.cause}")
         if (e.state == CallEvent.State.ENDED && CallRegistry.snapshot().none { it.callId != e.callId && it.state != CallEvent.State.ENDED }) {
@@ -182,7 +205,23 @@ object Relay {
     }
 
     private fun send(p: Peer, b: Envelope.Builder, replyTo: Int = 0) {
-        val bytes = b.setSeq(seq.incrementAndGet()).setReplyTo(replyTo).build().toByteArray()
+        var bytes = b.setSeq(seq.incrementAndGet()).setReplyTo(replyTo).build().toByteArray()
+        // A status that outgrew one frame (release notes, many saved networks or hotspot clients) is never dropped:
+        // the iPhone would hear nothing from this host again. Shed the optional parts until it fits (audit, 19 Oct).
+        if (bytes.size > Framing.MAX_FRAME && b.bodyCase == Envelope.BodyCase.HOST_STATUS) {
+            val s = b.hostStatus.toBuilder()
+            val steps = listOf<() -> Unit>(
+                { s.setUpdate(s.update.toBuilder().clearNotes()) },
+                { s.setHotspot(s.hotspot.toBuilder().clearClients()) },
+                { s.setHostWifi(s.hostWifi.toBuilder().clearSaved()) },
+            )
+            for (step in steps) {
+                step(); b.setHostStatus(s)
+                bytes = b.build().toByteArray()
+                if (bytes.size <= Framing.MAX_FRAME) break
+            }
+            Log.w(TAG, "status trimmed to ${bytes.size} bytes")
+        }
         if (bytes.size > Framing.MAX_FRAME) { Log.e(TAG, "${b.bodyCase} is ${bytes.size} bytes: too big to send, dropped"); return }
         runCatching { p.send(bytes) }.onFailure { Log.e(TAG, "send ${b.bodyCase} to ${p.id} failed: $it") }
     }
@@ -258,6 +297,7 @@ object Relay {
                 main.post(pushStatus)
             }
             Envelope.BodyCase.DIAGNOSTICS_REQUEST -> sendDiagnostics(d, env.diagnosticsRequest.maxBytes)
+            Envelope.BodyCase.UNPAIR -> unpair(d, env.seq)
             Envelope.BodyCase.SET_HOTSPOT -> {
                 // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
                 if (env.setHotspot.on && !bleNear() && CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED })
@@ -325,16 +365,21 @@ object Relay {
         val windowOpen = SystemClock.elapsedRealtime() < pairingUntil
         when {
             id.isEmpty() -> return reject(d, env.seq)
-            pin == id -> {}
-            windowOpen && d is Peer.Ble -> {
+            pin == id -> if (windowOpen && d is Peer.Ble) { pairingUntil = 0; pairableChanged() }   // ours again: close it
+            (windowOpen || pin == null) && d is Peer.Ble -> {
                 app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("pinned_install_id", id).apply()
                 pairingUntil = 0
+                pairableChanged()
                 Log.i(TAG, "PAIRED with client ${env.hello.deviceModel} install_id=${id.take(8)}")
             }
             else -> return reject(d, env.seq)
         }
         trusted.add(d.id)
-        if (d is Peer.Ble) HostWifi.evaluate("Bluetooth up")
+        if (d is Peer.Ble) {
+            HostWifi.evaluate("Bluetooth up")
+            // Remembered so the same iPhone can pair again on its own after iOS dropped its keys (see the receiver)
+            app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("client_mac", d.id).apply()
+        }
         app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("client_model", env.hello.deviceModel).apply()
         Diag.milestone("paired", org.json.JSONObject().put("client", env.hello.deviceModel.substringBefore(' ')))
         Log.i(TAG, "Hello from ${env.hello.deviceModel} app ${env.hello.appVersion} (protocol ${env.hello.protocolVersion}) via ${if (d is Peer.Ble) "Bluetooth" else "internet"}")
@@ -345,6 +390,24 @@ object Relay {
         Updater.informed()
         CallRegistry.snapshot().forEach { send(d, Envelope.newBuilder().setCallEvent(it)) }
         SmsStore.pending(app).forEach { send(d, Envelope.newBuilder().setSmsReceived(it)) }
+    }
+
+    /** The paired iPhone forgot this host: forget it too (pin, Bluetooth bond), so a new pairing starts clean. A
+     *  stale bond made the next pairing fail ("encryption is insufficient", 19 Oct). */
+    private fun unpair(d: Peer, replyTo: Int) {
+        val p = app.getSharedPreferences("relay", Context.MODE_PRIVATE)
+        val mac = p.getString("client_mac", null) ?: (d as? Peer.Ble)?.id
+        send(d, Envelope.newBuilder().setUnpair(Unpair.getDefaultInstance()), replyTo)   // the iPhone waits for this
+        p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
+        trusted.clear()
+        pairableChanged()                                       // unpaired: ready for the next iPhone
+        Log.i(TAG, "UNPAIRED: the iPhone forgot this host")
+        Diag.event("unpaired", org.json.JSONObject().put("what", "client_forgot"), withLog = false)
+        main.postDelayed({
+            d.drop()
+            if (mac != null) pairExec.execute { RootBt.unbond(app, mac) }
+            main.post(pushStatus)
+        }, 500)
     }
 
     private fun reject(d: Peer, replyTo: Int) {
@@ -391,7 +454,8 @@ object Relay {
         return Uplink.newBuilder().setKind(kind).setName(name).build()
     }
 
-    private val pushStatus = Runnable { broadcast(Envelope.newBuilder().setHostStatus(status())) }
+    // Runs on the main thread after every change: a failure here must cost one status, not the process.
+    private val pushStatus = Runnable { Bg.guard("status") { broadcast(Envelope.newBuilder().setHostStatus(status())) } }
 
     /**
      * This process may be new while a client's link stayed up (app update or crash): the client doesn't know
@@ -417,7 +481,8 @@ object Relay {
                     if (d.address !in trusted && ble.connectedDevices().any { it.address == d.address } &&
                         CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) {
                         Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the iPhone reconnects")
-                        Root.background("svc bluetooth disable; sleep 2; svc bluetooth enable")
+                        // Detached: if this app dies in those 2 s, Bluetooth must still come back on
+                        Root.background("setsid sh -c 'svc bluetooth disable; sleep 2; svc bluetooth enable' </dev/null >/dev/null 2>&1 &")
                     }
                 }, 3000)
             }
@@ -427,7 +492,10 @@ object Relay {
     /** The host's half of a problem report from the iPhone: scrubbed log + facts, in parts (frames are <= 4 KB). */
     private fun sendDiagnostics(d: Peer, maxBytes: Int) = Thread {
         val log = Diag.recentLog(if (maxBytes in 1..32_000) maxBytes else 16_000)
-        val facts = Diag.facts("event").apply { remove("install_id"); remove("kind") }.toString()
+        val facts = Diag.facts("event").apply {
+            remove("install_id"); remove("kind")
+            Compat.bleCaps(app)?.let { put("ble", it) }
+        }.toString()
         val parts = utf8Chunks(log, 2_800).ifEmpty { listOf("") }
         parts.forEachIndexed { i, chunk ->
             val m = dev.simrelay.protocol.v1.Diagnostics.newBuilder().setLog(chunk).setPart(i + 1).setParts(parts.size)
@@ -443,6 +511,7 @@ object Relay {
             HostWifi.evaluate("keep-alive")
             guardSmsRole()
             Diag.retry()                                     // reports queued while offline
+            if (Box.blocksPowerKey) Daemon.powerKey(true)    // the daemon's dead-man: an unconfirmed block lapses in 15 min
             broadcast(Envelope.newBuilder().setKeepAlive(KeepAlive.newBuilder().setN(++kaN)))
             main.postDelayed(this, KEEPALIVE_MS)
         }

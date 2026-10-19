@@ -17,6 +17,7 @@ class CallMonitor : InCallService() {
     override fun onCreate() {
         super.onCreate()
         CallRegistry.init(this)
+        HostService.ensure(this)                 // a call is the worst moment to find the host down
     }
 
     override fun onCallAdded(call: Call) {

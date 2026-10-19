@@ -12,9 +12,10 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
-import android.bluetooth.le.AdvertiseCallback
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertisingSetParameters
 import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertiseSettings
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -62,8 +63,12 @@ class BleLink(
     private val ctx: Context,
     private val onFrame: (BluetoothDevice, ByteArray) -> Unit,
     private val onLink: (BluetoothDevice, Boolean) -> Unit,
+    private val pairable: () -> Boolean = { false },
 ) {
     companion object {
+        /** Advertised instead of [SERVICE] while the host is ready to pair; the iPhone's Add host sheet looks for it
+         *  only. (A manufacturer-data mark under company 0xFFFF was ignored by iOS's sheet, 19 Oct.) */
+        val PAIR_SERVICE: UUID = UUID.fromString("0e9c0002-0971-48af-ba0b-2c5c254faec0")
         private const val TAG = "SimRelayHost"
         val SERVICE: UUID = UUID.fromString("0e9c0001-0971-48af-ba0b-2c5c254faec0")
         val CTRL_TX: UUID = UUID.fromString("0e9c0002-0971-48af-ba0b-2c5c254faec0")
@@ -84,13 +89,30 @@ class BleLink(
     private val notifyFails = ConcurrentHashMap<String, Int>()
     @Volatile var audioPsm = 0
 
+    /**
+     * A host without Bluetooth is unreachable near its iPhone, so it doesn't stay off: switched off by someone,
+     * airplane mode or an OEM power saver, it comes back on after 10 s (as root; at most every 30 s). Our own reset
+     * turns it back on within 2 s, so this only acts when nobody else will (audit, 19 Oct).
+     */
+    private var lastRadioKick = 0L
+    private fun radioBack() { main.removeCallbacks(radioCheck); main.postDelayed(radioCheck, 10_000) }
+    private val radioCheck: Runnable = Runnable {
+        if (bt.adapter?.isEnabled == true) return@Runnable
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRadioKick < 30_000) { radioBack(); return@Runnable }
+        lastRadioKick = now
+        Log.i(TAG, "Bluetooth is off: switching it back on")
+        Root.background("svc bluetooth enable")
+        radioBack()                                    // checks again; the 30 s limit paces it
+    }
+
     /** GATT service + advertising; with the radio off (left off, or mid-toggle) STATE_ON calls this again. */
     fun start() {
         if (!radioWatch) {
             radioWatch = true
             ctx.registerReceiver(radioReceiver, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
         }
-        if (bt.adapter?.isEnabled != true) { Log.w(TAG, "Bluetooth is off: GATT service waits for it"); return }
+        if (bt.adapter?.isEnabled != true) { Log.w(TAG, "Bluetooth is off: GATT service waits for it"); radioBack(); return }
         val service = BluetoothGattService(SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         tx = BluetoothGattCharacteristic(CTRL_TX, BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED).apply {
@@ -120,8 +142,10 @@ class BleLink(
                 android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF -> main.post {
                     Log.i(TAG, "Bluetooth turning off: GATT server down")
                     runCatching { gatt?.close() }; gatt = null
+                    advSet = null; registered = false; starting = false; replacing = false; enableTries = 0; failures = 0; advDisabled = false   // the radio drops it
                     readers.clear(); queues.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
                 }
+                android.bluetooth.BluetoothAdapter.STATE_OFF -> radioBack()
                 android.bluetooth.BluetoothAdapter.STATE_ON -> main.post {
                     if (gatt != null) return@post
                     Log.i(TAG, "Bluetooth on again: rebuilding the GATT service and advertising")
@@ -132,7 +156,8 @@ class BleLink(
     }
 
     fun stop() {
-        runCatching { bt.adapter.bluetoothLeAdvertiser.stopAdvertising(advCallback) }
+        runCatching { bt.adapter.bluetoothLeAdvertiser.stopAdvertisingSet(advCallback) }
+        advSet = null; registered = false; starting = false; replacing = false
         gatt?.close()
         gatt = null
     }
@@ -178,7 +203,8 @@ class BleLink(
             return
         }
         // First use: attach a client role to the existing link; request priority once connected.
-        clients[d.address] = d.connectGatt(ctx, false, object : android.bluetooth.BluetoothGattCallback() {
+        // null while the Bluetooth service restarts (a call ringing then crashed the host: audit, 19 Oct)
+        val g = runCatching { d.connectGatt(ctx, false, object : android.bluetooth.BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     val p = if (wantHigh) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED
@@ -192,7 +218,8 @@ class BleLink(
             fun onConnectionUpdated(g: BluetoothGatt, interval: Int, latency: Int, timeout: Int, status: Int) {
                 Log.i(TAG, "BLE connection updated: interval ${interval * 1.25} ms, latency $latency, timeout ${timeout * 10} ms, status $status")
             }
-        }, BluetoothDevice.TRANSPORT_LE)
+        }, BluetoothDevice.TRANSPORT_LE) }.getOrNull()
+        if (g != null) clients[d.address] = g else Log.w(TAG, "connection priority: no GATT client right now")
     }
 
     private fun pump(device: BluetoothDevice) {
@@ -314,26 +341,116 @@ class BleLink(
 
     // ---------------------------------------------------------------- advertising
 
-    private val advCallback = object : AdvertiseCallback() {
-        override fun onStartSuccess(s: AdvertiseSettings) { Log.i(TAG, "advertising") }
-        override fun onStartFailure(code: Int) { Log.e(TAG, "advertising failed $code") }
+    // One advertising set for the host's life, enabled again after each disconnect. Android gives every new set a
+    // new random address; before the iPhone bonds (no shared key to follow address changes), the host it picked in
+    // Apple's accessory sheet then vanished at the first disconnect and the iPhone hung at "connecting" (19 Oct).
+    //
+    // A small state machine on the main thread: at most one start in flight; a set is replaced only after Android
+    // confirms the old one stopped (or 2 s pass); each failure kind has its own answer, and none retries every 2 s
+    // forever or leaves advertising off for good (audit, 19 Oct).
+    @Volatile private var advSet: AdvertisingSet? = null
+    private var registered = false               // our callback is attached to a set (started, not yet stopped)
+    private var starting = false
+    private var replacing = false
+    private var enableTries = 0
+    private var failures = 0
+    private var withName = true                  // the name in the scan response, unless it doesn't fit
+    private var advDisabled = false              // the controller can't advertise as we need: reported, not retried
+    private val reportedAdv = HashSet<Int>()
+
+    private val advCallback = object : AdvertisingSetCallback() {
+        override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
+            starting = false
+            if (status == ADVERTISE_SUCCESS) { advSet = set; registered = true; failures = 0; enableTries = 0; Log.i(TAG, "advertising"); return }
+            failures++
+            Log.w(TAG, "advertising failed $status (try $failures)")
+            report(status)
+            when (status) {
+                ADVERTISE_FAILED_DATA_TOO_LARGE -> { withName = false; retry(0) }       // a long Bluetooth name
+                ADVERTISE_FAILED_ALREADY_STARTED -> replaceSet()
+                ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> { advDisabled = true; Log.e(TAG, "this Bluetooth can't advertise as a host") }
+                ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> retry(60_000)                 // another app holds the only slot
+                else -> retry(minOf(60_000L, 2_000L shl minOf(failures, 5)))
+            }
+        }
+        override fun onAdvertisingEnabled(set: AdvertisingSet?, enable: Boolean, status: Int) {
+            if (!enable) return
+            if (status == ADVERTISE_SUCCESS) { enableTries = 0; Log.i(TAG, "advertising again (same address)"); return }
+            // Right after a disconnect the controller can still refuse (status 18 on the Redmi, 19 Oct): retry the same
+            // set a few times (its address is what an unbonded iPhone knows), then replace it.
+            enableTries++
+            Log.w(TAG, "advertising again failed $status (try $enableTries)")
+            if (enableTries < 5) retry(400L * enableTries) else replaceSet()
+        }
+        override fun onAdvertisingSetStopped(set: AdvertisingSet?) {
+            if (advSet === set) advSet = null
+            registered = false
+            if (replacing) { replacing = false; retry(300) }
+        }
+    }
+
+    private fun retry(ms: Long) { main.postDelayed({ advertise() }, ms) }
+
+    private fun report(status: Int) {
+        if (reportedAdv.add(status)) Diag.event("advertising_failed", org.json.JSONObject().put("what", "status $status")
+            .put("multi_adv", bt.adapter?.isMultipleAdvertisementSupported).put("name_bytes", nameBytes()), withLog = false)
+    }
+
+    @Suppress("MissingPermission")
+    private fun nameBytes(): Int = runCatching { bt.adapter?.name?.toByteArray()?.size ?: 0 }.getOrDefault(0)
+
+    /** [PAIR_SERVICE] while [pairable] (the Add host sheet lists only those), else [SERVICE] (the paired iPhone's
+     *  search). The GATT service is [SERVICE] either way. */
+    private fun adData(): AdvertiseData =
+        AdvertiseData.Builder().addServiceUuid(ParcelUuid(if (pairable()) PAIR_SERVICE else SERVICE)).build()
+
+    /** The phone's name in the scan response when it fits (31 bytes - 2; Android 11/12 count the whole name, and
+     *  refuse the set otherwise): nameless, the host still works, the iPhone's sheet shows TosbiSim Host. */
+    private fun scanResponse(): AdvertiseData =
+        AdvertiseData.Builder().setIncludeDeviceName(withName && nameBytes() <= 29).build()
+
+    /** The pairable state changed: update the running set's data (same set, same address). */
+    fun refreshAdvertising() = main.post {
+        val set = advSet ?: return@post
+        val p = pairable()
+        runCatching { set.setAdvertisingData(adData()) }.onSuccess { Log.i(TAG, "advertising: ${if (p) "ready to pair" else "paired"}") }
+    }
+
+    /** Drop the set; a new one (new address) starts once Android confirms it stopped, or after 2 s without a word. */
+    private fun replaceSet() {
+        enableTries = 0
+        val adv = bt.adapter?.bluetoothLeAdvertiser
+        if (adv == null || !registered) { advSet = null; registered = false; retry(300); return }
+        replacing = true
+        if (runCatching { adv.stopAdvertisingSet(advCallback) }.isFailure) { replacing = false; advSet = null; registered = false; retry(300); return }
+        main.postDelayed({ if (replacing) { replacing = false; advSet = null; registered = false; Log.w(TAG, "advertising: no stop confirmation"); advertise() } }, 2000)
     }
 
     private fun advertise() {
-        val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-            .setConnectable(true)
-            .build()
+        if (gatt == null || advDisabled || starting || replacing) return
         val adv = bt.adapter?.bluetoothLeAdvertiser ?: run { Log.w(TAG, "no advertiser: Bluetooth is off"); return }
-        adv.startAdvertising(settings,
-            AdvertiseData.Builder().addServiceUuid(ParcelUuid(SERVICE)).build(),
-            AdvertiseData.Builder().setIncludeDeviceName(true).build(), advCallback)
+        advSet?.let { set ->
+            if (runCatching { set.enableAdvertising(true, 0, 0) }.isSuccess) return
+            advSet = null
+        }
+        if (registered) { replaceSet(); return }        // a set we lost track of still holds our callback
+        val params = AdvertisingSetParameters.Builder()
+            .setLegacyMode(true).setConnectable(true).setScannable(true)
+            .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
+            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
+            .build()
+        starting = true
+        runCatching { adv.startAdvertisingSet(params, adData(), scanResponse(), null, null, advCallback) }.onFailure { e ->
+            starting = false
+            Log.w(TAG, "advertising: $e")
+            when {
+                e.message?.contains("too big", ignoreCase = true) == true -> { withName = false; retry(0) }
+                e.message?.contains("already associated", ignoreCase = true) == true -> { registered = true; replaceSet() }
+                else -> { failures++; retry(minOf(60_000L, 2_000L shl minOf(failures, 5))) }
+            }
+        }
     }
 
-    /** Connectable advertising stops once a central connects; restart it after every real disconnect. */
-    private fun restartAdvertising() = main.post {
-        runCatching { bt.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advCallback) }
-        if (gatt != null) advertise()
-    }
+    /** Connectable advertising stops once a central connects; enable it again after every real disconnect. */
+    private fun restartAdvertising() = main.post { advertise() }
 }

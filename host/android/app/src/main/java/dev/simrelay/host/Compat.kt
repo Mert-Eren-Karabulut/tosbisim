@@ -36,21 +36,38 @@ object Compat {
         return compute(ctx).also { cached = Triple(key, lang, it) }
     }
 
+    /**
+     * The live table from api.tosbisim.com when we have one (Api.refreshSupportTable), else the bundled copy; a table
+     * that fails to evaluate falls back to the bundled one. Never throws: this runs on every status the host sends,
+     * so a bad server table would otherwise crash every host at every start (audit, 19 Oct).
+     */
     private fun compute(ctx: Context): Verdict {
-        // The live table from api.tosbisim.com when we have one (Api.refreshSupportTable), else the bundled copy.
-        val table = runCatching {
-            val live = File(ctx.filesDir, "support.json")
-            JSONObject(if (live.exists()) live.readText() else ctx.assets.open("support.json").bufferedReader().readText())
-        }
-            .onFailure { Log.w(TAG, "support.json: $it") }.getOrNull()
+        val live = File(ctx.filesDir, "support.json")
+        if (live.exists()) runCatching { return evaluate(JSONObject(live.readText())) }
+            .onFailure { Log.w(TAG, "live support table unusable, using the bundled one: $it") }
+        return runCatching { evaluate(JSONObject(ctx.assets.open("support.json").bufferedReader().readText())) }
+            .onFailure { Log.w(TAG, "bundled support table unusable: $it") }
+            .getOrDefault(Verdict(Tier.UNKNOWN, "${Build.MANUFACTURER} ${Build.MODEL}", ""))
+    }
+
+    /** A downloaded table is accepted only if it evaluates (Api.refreshSupportTable). */
+    fun validTable(text: String): Boolean = runCatching {
+        val t = JSONObject(text)
+        require((t.optJSONArray("phones")?.length() ?: 0) > 0) { "no phones" }
+        evaluate(t); true
+    }.onFailure { Log.w(TAG, "support table rejected: $it") }.getOrDefault(false)
+
+    private fun evaluate(table: JSONObject?): Verdict {
         val maker = Build.MANUFACTURER.lowercase()
         val fallbackName = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
         // Rules first: a US Samsung shares its codename with an unlockable model but can't be rooted.
         table?.optJSONArray("rules")?.let { rules ->
             for (i in 0 until rules.length()) {
-                val r = rules.getJSONObject(i)
-                val makers = r.optJSONArray("manufacturers")?.let { a -> (0 until a.length()).map { a.getString(it) } }
-                val regex = r.optString("model_regex").takeIf { it.isNotEmpty() }?.toRegex()
+                val r = rules.optJSONObject(i) ?: continue
+                val makers = r.optJSONArray("manufacturers")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+                // A pattern Java can't compile is skipped, not fatal
+                val pattern = r.optString("model_regex")
+                val regex = if (pattern.isEmpty()) null else (runCatching { pattern.toRegex() }.getOrNull() ?: continue)
                 val minSdk = r.optInt("min_sdk", 0)
                 val hit = when {
                     minSdk > 0 -> Build.VERSION.SDK_INT < minSdk
@@ -62,15 +79,15 @@ object Compat {
             }
         }
         table?.optJSONArray("phones")?.let { phones ->
-            val list = (0 until phones.length()).map { phones.getJSONObject(it) }
-            fun strings(p: JSONObject, k: String) = p.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+            val list = (0 until phones.length()).mapNotNull { phones.optJSONObject(it) }
+            fun strings(p: JSONObject, k: String) = p.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
             fun tierOf(p: JSONObject) = runCatching { Tier.valueOf(p.getString("tier").uppercase()) }.getOrDefault(Tier.UNKNOWN)
             // The exact model number wins over a shared codename (the S20 FE 5G is also "r8q").
             // An unsupported row without its own note (corpus rows): the maker rule's reason, so people learn why.
             fun note(p: JSONObject): String = local(p, "note").ifEmpty {
                 if (tierOf(p) != Tier.UNSUPPORTED) "" else table.optJSONArray("rules")?.let { rules ->
-                    (0 until rules.length()).map { rules.getJSONObject(it) }.firstOrNull { r ->
-                        r.optJSONArray("manufacturers")?.let { a -> (0 until a.length()).any { a.getString(it) == maker } } == true
+                    (0 until rules.length()).mapNotNull { rules.optJSONObject(it) }.firstOrNull { r ->
+                        r.optJSONArray("manufacturers")?.let { a -> (0 until a.length()).any { a.optString(it) == maker } } == true
                     }?.let { local(it, "reason") }
                 }.orEmpty()
             }
@@ -116,6 +133,21 @@ object Compat {
     fun bleAdvertising(ctx: Context): Boolean? {
         val a = ctx.getSystemService(BluetoothManager::class.java)?.adapter ?: return false
         return if (a.isEnabled) a.isMultipleAdvertisementSupported else null      // unknown while Bluetooth is off
+    }
+
+    /** The Bluetooth controller's LE abilities, for diagnostics: what separates "should work" from "works" on
+     *  phones we never held (advertising sets, PHYs, data length). Null while Bluetooth is off. */
+    @Suppress("MissingPermission")
+    fun bleCaps(ctx: Context): org.json.JSONObject? {
+        val a = ctx.getSystemService(BluetoothManager::class.java)?.adapter ?: return null
+        if (!a.isEnabled) return null
+        return runCatching {
+            org.json.JSONObject()
+                .put("multi_adv", a.isMultipleAdvertisementSupported).put("ext_adv", a.isLeExtendedAdvertisingSupported)
+                .put("le_2m", a.isLe2MPhySupported).put("le_coded", a.isLeCodedPhySupported)
+                .put("periodic_adv", a.isLePeriodicAdvertisingSupported).put("max_adv_len", a.leMaximumAdvertisingDataLength)
+                .put("offload_filter", a.isOffloadedFilteringSupported)
+        }.getOrNull()
     }
 
     fun soc(): String =

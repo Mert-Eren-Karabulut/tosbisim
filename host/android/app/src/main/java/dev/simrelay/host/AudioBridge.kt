@@ -37,13 +37,19 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
     }
 
     private fun acceptLoop() {
+        var fails = 0
         while (acceptThread != null) {
             if (!adapter.isEnabled) { Thread.sleep(2000); continue }   // radio off: wait quietly (BleLink rebuilds on STATE_ON)
             val srv = try {
                 adapter.listenUsingL2capChannel()      // secure: needs the bonded, encrypted link
             } catch (e: Exception) {
-                Log.e(TAG, "L2CAP listen failed: $e"); Thread.sleep(2000); continue
+                // A controller without LE credit-based channels never succeeds: back off to a minute, report once
+                fails++
+                if (fails == 3) Diag.event("audio_channel_failed", org.json.JSONObject().put("what", e.javaClass.simpleName), withLog = false)
+                if (fails <= 3 || fails % 30 == 0) Log.e(TAG, "L2CAP listen failed ($fails): $e")
+                Thread.sleep(minOf(60_000L, 2_000L shl minOf(fails - 1, 5))); continue
             }
+            fails = 0
             server = srv
             ble.audioPsm = srv.psm
             Log.i(TAG, "audio L2CAP listening psm=${srv.psm}")

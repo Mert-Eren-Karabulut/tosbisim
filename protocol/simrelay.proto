@@ -48,6 +48,7 @@ message Envelope {
     WifiForget wifi_forget = 60;        // client -> host, Bluetooth only
     DiagnosticsRequest diagnostics_request = 61; // client -> host: the host's side of a problem report
     Diagnostics diagnostics = 62;                // host -> client (reply)
+    Unpair unpair = 63;                          // client -> host: "forget this host" on the iPhone
   }
 }
 
@@ -388,6 +389,10 @@ message Uplink {
 
 // Problem reports (anonymous): the host's recent log, scrubbed on the host before it leaves (no phone numbers,
 // hardware addresses, network names, ids or message text), plus the facts that identify the phone model and setup.
+// The iPhone forgets this host: the host forgets the iPhone too (its pin and its Bluetooth bond), so both sides
+// start clean and another iPhone can pair.
+message Unpair {}
+
 message DiagnosticsRequest {
   uint32 max_bytes = 1;          // 0 = the host's default (16 KB)
 }

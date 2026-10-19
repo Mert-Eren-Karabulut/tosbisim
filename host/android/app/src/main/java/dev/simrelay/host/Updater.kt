@@ -25,7 +25,7 @@ object Updater {
     private const val TAG = "SimRelayHost"
     private const val DAY_MS = 24 * 3600_000L
     private val thread = HandlerThread("updater").apply { start() }
-    private val h = Handler(thread.looper)
+    private val h = Bg.handler("updater", thread.looper)
     private lateinit var app: Context
     private lateinit var changed: () -> Unit
 
@@ -109,7 +109,7 @@ object Updater {
         val list = r.optJSONArray("releases")
         // The notes ride in every HostStatus: newest 3 versions, each capped, so a host far behind never builds a status
         // too big for one frame (that would crash-loop the app).
-        notes = (0 until minOf(list?.length() ?: 0, 3)).map { list!!.getJSONObject(it) }.map {
+        notes = (0 until minOf(list?.length() ?: 0, 3)).mapNotNull { list?.optJSONObject(it) }.map {
             Update.Note.newBuilder().setVersion(it.optString("version"))
                 .setEn(it.optJSONObject("notes")?.optString("en").orEmpty().take(600))
                 .setTr(it.optJSONObject("notes")?.optString("tr").orEmpty().take(600)).build()
@@ -209,7 +209,8 @@ object Updater {
             val installedSha = Root.sh("sha256sum /data/adb/modules/simrelay-host/simrelayd").out.substringBefore(' ')
             if (installedSha.isNotEmpty() && installedSha != sha256(fresh)) {
                 val m = "/data/adb/modules/simrelay-host"
-                Root.sh("cp ${Root.q(fresh.path)} $m/simrelayd.tmp && chmod 755 $m/simrelayd.tmp && " +
+                // The running build is kept as simrelayd.prev: service.sh goes back to it if the new one won't start
+                Root.sh("cp $m/simrelayd $m/simrelayd.prev; cp ${Root.q(fresh.path)} $m/simrelayd.tmp && chmod 755 $m/simrelayd.tmp && " +
                     "mv -f $m/simrelayd.tmp $m/simrelayd && kill -USR1 \$(pidof simrelayd)")
                 // USR1: the old daemon leaves the host silenced; the new one announces itself (DAEMON_UP -> reconnect)
                 Log.i(TAG, "simrelayd updated from this app version (restarts in 2 s)")

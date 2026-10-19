@@ -26,7 +26,7 @@ object Hotspot {
     private const val SEC_WPA3_TRANSITION = 2
     private const val SEC_WPA3 = 3
 
-    private val exec = Executors.newSingleThreadExecutor()
+    private val exec = Bg.single("hotspot")
     @Volatile private var clients: List<HotspotMsg.Client> = emptyList()
     @Volatile private var tetheredWifi = false
     private val main = android.os.Handler(android.os.Looper.getMainLooper())

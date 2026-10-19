@@ -1,7 +1,7 @@
 // simrelayd box mode helpers. Copyright (C) 2026 SIM Relay authors. GPL-3.0-or-later.
 #pragma once
 
-#define BOX_MAX_KEYDEVS 6
+#define BOX_MAX_KEYDEVS 32
 
 int box_screen(int on);                         // 0 = sleep, 1 = wake
 int box_role(const char *role, const char *pkg);
@@ -20,4 +20,7 @@ int box_power_block(int on);                   // box mode: grab (1) / release (
 int box_key_fd(int i);
 void box_key_event(int fd);                     // read events, run the escape gesture
 void box_announce(void);
-void box_log_capture(void);                     // rotated copy of our logs in /data/adb/tosbisim/logs                        // DAEMON_UP broadcast to the host app
+void box_log_capture(void);
+void box_log_watch(void);
+void box_key_drop(int i);                      // a watched input device went away
+void box_power_check(void);                    // release an unconfirmed power key block (main loop)                       // restart the capture when the file stops growing (main loop)                     // rotated copy of our logs in /data/adb/tosbisim/logs                        // DAEMON_UP broadcast to the host app

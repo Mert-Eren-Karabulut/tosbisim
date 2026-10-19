@@ -19,7 +19,7 @@ import java.util.concurrent.Executors
  */
 object Onboarding {
     private const val TAG = "SimRelayHost"
-    private val worker = Executors.newSingleThreadExecutor { Thread(it, "onboarding").apply { isDaemon = true } }
+    private val worker = Bg.single("onboarding")
 
     /** What the root check found. */
     enum class Root { UNKNOWN, CHECKING, OK, NO_SU, TIMEOUT, DENIED }
@@ -155,10 +155,13 @@ object Onboarding {
 
     // ---------------------------------------------------------------- host-mode health, and fixing it as root
 
-    /** Runtime permissions the host needs (the module grants them; Fix grants them again). */
+    /** Runtime permissions the host needs (the module grants them; Fix grants them again). Only those this Android
+     *  has: Bluetooth advertise/connect are Android 12+, notifications 13+ (an Android 11 host always reported them
+     *  missing, and Fix could never clear the card: Redmi Note 8 Pro, 19 Oct 2026). */
     val RUNTIME = listOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.CALL_PHONE, Manifest.permission.RECEIVE_SMS,
-        Manifest.permission.SEND_SMS, Manifest.permission.READ_SMS, Manifest.permission.BLUETOOTH_ADVERTISE,
-        Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.POST_NOTIFICATIONS)
+        Manifest.permission.SEND_SMS, Manifest.permission.READ_SMS) +
+        (if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT) else emptyList()) +
+        (if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList())
     /** Privileged permissions only the module's privapp whitelist gives (missing = module not active as it should). */
     val PRIVILEGED = listOf("android.permission.MODIFY_PHONE_STATE", "android.permission.WRITE_SECURE_SETTINGS",
         "android.permission.CONTROL_INCALL_EXPERIENCE", "android.permission.TETHER_PRIVILEGED")

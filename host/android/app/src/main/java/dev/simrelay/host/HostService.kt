@@ -15,13 +15,34 @@ import android.util.Log
 
 /** Long-lived foreground service: owns the daemon connection and the BLE relay. */
 class HostService : Service() {
-    companion object { private const val TAG = "SimRelayHost" }
+    companion object {
+        private const val TAG = "SimRelayHost"
+        @Volatile var running = false; private set
+
+        /**
+         * Start the host if it isn't running: from every way the system can wake this app (a call, an SMS, the
+         * daemon's start-up broadcast). Once Android stops restarting a crashed service, nothing else brought it
+         * back (audit, 19 Oct). Never throws.
+         */
+        fun ensure(ctx: Context) {
+            if (running || !Compat.isHostInstalled(ctx)) return
+            runCatching { ctx.startForegroundService(Intent(ctx, HostService::class.java)) }
+                .onFailure { Log.w(TAG, "host start: $it") }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
+    override fun onDestroy() { running = false; super.onDestroy() }
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(1, notification())
+        // Android 12+ refuses a background foreground-service start without an exemption (an OEM battery manager
+        // that dropped ours): stop cleanly and let the module's watchdog start us as root, rather than crash-loop.
+        try { startForeground(1, notification()) } catch (e: Exception) {
+            Log.e(TAG, "startForeground refused: $e")
+            Diag.event("host_start_refused", org.json.JSONObject().put("what", e.javaClass.simpleName), withLog = false)
+            stopSelf(); return
+        }
         if (!Compat.isHostInstalled(this)) {      // plain app install (before root): compatibility check only
             Log.i(TAG, "not installed as the host yet; service stays off")
             stopSelf(); return
@@ -29,7 +50,8 @@ class HostService : Service() {
         Log.i(TAG, "host service up; silence: zen_mode=${Settings.Global.getInt(contentResolver, "zen_mode", -1)} " +
                 "(2 = total silence)")
         silenceStreams()
-        Diag.milestone("host_running")
+        running = true
+        Diag.milestone("host_running", org.json.JSONObject().apply { Compat.bleCaps(this@HostService)?.let { put("ble", it) } })
         Onboarding.hostRunning(this)
         Daemon.start(this)
         Relay.start(this)

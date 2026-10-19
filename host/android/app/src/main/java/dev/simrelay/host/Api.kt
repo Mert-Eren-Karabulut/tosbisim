@@ -60,8 +60,14 @@ object Api {
             when (c.responseCode) {
                 200 -> {
                     // Whole file or nothing: a reader (the setup screen) must never see half a table
+                    val text = c.inputStream.bufferedReader().readText()
+                    // Only a table that evaluates replaces ours: every status reads it (a bad one must not reach phones)
+                    if (!Compat.validTable(text)) {
+                        Diag.event("support_table_rejected", org.json.JSONObject().put("what", "invalid").put("bytes", text.length), withLog = false)
+                        return@runCatching
+                    }
                     val tmp = File(ctx.filesDir, "support.json.tmp")
-                    tmp.writeText(c.inputStream.bufferedReader().readText())
+                    tmp.writeText(text)
                     if (!tmp.renameTo(f)) { tmp.delete(); error("rename failed") }
                     ctx.getSharedPreferences("api", Context.MODE_PRIVATE).edit().putString("support_etag", c.getHeaderField("ETag")).apply()
                     Log.i(TAG, "support table updated (${c.getHeaderField("ETag")})")

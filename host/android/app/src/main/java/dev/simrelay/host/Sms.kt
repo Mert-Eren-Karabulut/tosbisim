@@ -44,6 +44,7 @@ object SmsStore {
 class SmsDeliverReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_DELIVER_ACTION) return
+        HostService.ensure(ctx)
         val parts = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
         if (parts.isEmpty()) return
         val from = parts[0].displayOriginatingAddress.orEmpty()

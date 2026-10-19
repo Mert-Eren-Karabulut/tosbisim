@@ -71,6 +71,10 @@ typedef struct {
     int write_only;            // device mutes: no get handler, reads back -1, restore = unmute
     int enumerated;            // ENUM controls use value.enumerated.item, not value.integer.value
     struct timespec last_write;
+    struct snd_ctl_elem_info info;   // type, count and range: every write is checked against it
+    struct timespec reapply_window;  // re-apply budget: a control that won't keep our value is left alone
+    int reapplies;
+    struct timespec paused_until;
 } managed_t;
 
 static int g_card = 0;
@@ -80,6 +84,7 @@ static managed_t g_m[MAX_MANAGED];
 static int g_nm = 0;
 // Host silence: controls held for the daemon's whole lifetime (e.g. speaker/earpiece amplifier mutes),
 // independent of calls. Fail-silent: if the daemon dies they stay muted until reboot.
+static int g_exit_code = 0;
 static managed_t g_perm[MAX_MANAGED];
 static int g_np = 0;
 static int g_call = 0, g_session = 0;
@@ -115,7 +120,81 @@ static int ctl_read_t(unsigned numid, long long *out, unsigned count, int enumer
     return 0;
 }
 
+// ------------------------------------------------------------------ write safety
+// A value is written only if the control says it can hold it. Production kernels don't range-check mixer writes and
+// vendor put() handlers index tables with the raw value: a profile matched by family (or built automatically) naming a
+// control that exists on another phone with another type or range could crash the kernel, on every boot (audit,
+// 19 Oct). Only boolean, integer and enum controls are written; n <= count; integers in [min, max] (a driver that
+// declares max <= min gives no range to check); enum items < items.
+static int value_ok(const char *name, const struct snd_ctl_elem_info *in, const long long *v, int n) {
+    if (n < 1 || (unsigned)n > in->count) { LOGE("'%s': %d value(s) for a %u-value control: not written", name, n, in->count); return 0; }
+    for (int i = 0; i < n; i++) {
+        int ok;
+        switch (in->type) {
+        case SNDRV_CTL_ELEM_TYPE_BOOLEAN: ok = v[i] == 0 || v[i] == 1; break;
+        case SNDRV_CTL_ELEM_TYPE_INTEGER:
+            ok = in->value.integer.max <= in->value.integer.min || (v[i] >= in->value.integer.min && v[i] <= in->value.integer.max);
+            break;
+        case SNDRV_CTL_ELEM_TYPE_ENUMERATED: ok = v[i] >= 0 && v[i] < (long long)in->value.enumerated.items; break;
+        default: LOGE("'%s': control type %d is never written", name, (int)in->type); return 0;
+        }
+        if (!ok) { LOGE("'%s': value %lld is outside the control's range: not written", name, v[i]); return 0; }
+    }
+    return 1;
+}
+
+// Crash breadcrumb: the boot id goes to a file before the first mixer write and is removed 60 s later. Found at start
+// with another boot's id, the phone went down while we were writing: this boot writes nothing (safe mode) and says so
+// in STATUS, so a write that crashes a kernel can't become a reboot loop.
+#define CRUMB "/data/adb/tosbisim/applying"
+#define SAFE_FILE "/data/adb/tosbisim/safe"     // the boot id safe mode belongs to: it lasts the whole boot
+static char g_boot_id[48] = "";
+static int g_safe = 0;
+static struct timespec g_crumb_until;
+
+static void crumb_start(void) {
+    int fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) { ssize_t n = read(fd, g_boot_id, sizeof(g_boot_id) - 1); close(fd); if (n > 0) g_boot_id[n] = 0; }
+    char prev[48] = "";
+    fd = open(CRUMB, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) { ssize_t n = read(fd, prev, sizeof(prev) - 1); close(fd); if (n > 0) prev[n] = 0; }
+    if (*prev && strcmp(prev, g_boot_id) != 0) {
+        g_safe = 1;
+        LOGE("SAFE MODE: the last boot ended while audio controls were being written; none are written this boot");
+        fd = open(SAFE_FILE, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        if (fd >= 0) { (void)!write(fd, g_boot_id, strlen(g_boot_id)); close(fd); }
+    }
+    unlink(CRUMB);
+    char safe[48] = "";                          // a restart within the same boot stays safe
+    fd = open(SAFE_FILE, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) { ssize_t n = read(fd, safe, sizeof(safe) - 1); close(fd); if (n > 0) safe[n] = 0; }
+    if (*safe && strcmp(safe, g_boot_id) == 0) { if (!g_safe) LOGE("SAFE MODE (this boot): no mixer writes"); g_safe = 1; }
+    else if (*safe) unlink(SAFE_FILE);
+}
+
+static void crumb_arm(void) {
+    if (!*g_boot_id) return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (g_crumb_until.tv_sec == 0) {
+        int fd = open(CRUMB, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        if (fd >= 0) { (void)!write(fd, g_boot_id, strlen(g_boot_id)); fsync(fd); close(fd); }
+    }
+    g_crumb_until.tv_sec = now.tv_sec + 60;
+}
+
+// ms until the breadcrumb is due to go (for poll), -1 if none
+static int crumb_tick(void) {
+    if (g_crumb_until.tv_sec == 0) return -1;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (now.tv_sec >= g_crumb_until.tv_sec) { unlink(CRUMB); g_crumb_until.tv_sec = 0; return -1; }
+    return (int)(g_crumb_until.tv_sec - now.tv_sec) * 1000;
+}
+
 static int ctl_write_value(managed_t *m, struct snd_ctl_elem_value *v) {
+    if (g_safe) return -1;
+    crumb_arm();
     v->id.numid = m->numid;
     clock_gettime(CLOCK_MONOTONIC, &m->last_write);
     if (g_ctl < 0 || ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_WRITE, v) < 0) {
@@ -128,6 +207,7 @@ static int ctl_write_value(managed_t *m, struct snd_ctl_elem_value *v) {
 // Set the first n channels and leave the others as they are (read-modify-write): "X=1" on a 2-channel switch must not
 // zero channel 2. Write-only controls (no get handler) are written from zero.
 static int ctl_write(managed_t *m, const long long *vals, int n) {
+    if (m->info.count && !value_ok(m->name, &m->info, vals, n)) return -1;
     struct snd_ctl_elem_value v;
     memset(&v, 0, sizeof(v));
     v.id.numid = m->numid;
@@ -147,7 +227,7 @@ static void ctl_restore(managed_t *m) {
 static void ctl_set_by_name(const char *name, const long long *vals, int n) {
     struct snd_ctl_elem_info info;
     if (!*name || ctl_info(name, &info) < 0) return;
-    managed_t tmp = { .numid = info.id.numid };
+    managed_t tmp = { .numid = info.id.numid, .info = info };
     strncpy(tmp.name, name, NAME_LEN - 1);
     if (ctl_write(&tmp, vals, n) == 0) LOGI("set '%s' (%lld ...)", name, vals[0]);
 }
@@ -163,6 +243,15 @@ static managed_t *manage_in(managed_t *list, int *count, const char *name, const
     if (!*name) return NULL;
     if (ctl_info(name, &info) < 0) { LOGW("no control '%s'", name); return NULL; }
     if (*count == MAX_MANAGED) { LOGE("too many managed controls"); return NULL; }
+    if (!value_ok(name, &info, want, n)) return NULL;
+    // One owner per control: held by silence and by a call with other values, they'd overwrite each other for ever
+    managed_t *other = list == g_m ? g_perm : g_m;
+    int nother = list == g_m ? g_np : g_nm;
+    for (int i = 0; i < nother; i++)
+        if (other[i].numid == info.id.numid && memcmp(other[i].want, want, sizeof(long long) * n) != 0) {
+            LOGE("'%s' is already held at another value: not managed twice", name);
+            return NULL;
+        }
     managed_t *m = &list[(*count)++];
     memset(m, 0, sizeof(*m));
     strncpy(m->name, name, NAME_LEN - 1);
@@ -171,6 +260,7 @@ static managed_t *manage_in(managed_t *list, int *count, const char *name, const
     m->write_only = write_only;
     m->enumerated = info.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED;
     m->nwant = n;
+    m->info = info;
     memcpy(m->want, want, sizeof(long long) * n);
     if (!write_only) {
         m->orig.id.numid = m->numid;
@@ -204,6 +294,7 @@ static int call_control_add(const char *spec) {
         char *end;
         if (n == MAX_VALUES) { LOGE("call control '%s': more than %d values", spec, MAX_VALUES); return -1; }
         g_cc[g_ncc].v[n++] = strtoll(q, &end, 0);
+        if (end == q || (*end && *end != ',')) { LOGE("call control '%s': not a number", spec); return -1; }   // "On" isn't 0
         if (*end != ',') break;
         q = end + 1;
     }
@@ -220,9 +311,11 @@ static int silence_add(const char *spec) {
     if (len >= NAME_LEN) return -1;
     memcpy(name, spec, len);
     name[len] = 0;
-    long long v = strtoll(eq + 1, NULL, 0);
+    char *end;
+    long long v = strtoll(eq + 1, &end, 0);
+    if (end == eq + 1 || *end) { LOGE("silence '%s': not a number", spec); return -1; }
     for (int i = 0; i < g_np; i++)
-        if (strcmp(g_perm[i].name, name) == 0) { g_perm[i].want[0] = v; ctl_write(&g_perm[i], &v, 1); return 0; }
+        if (strcmp(g_perm[i].name, name) == 0) { if (ctl_write(&g_perm[i], &v, 1) == 0) g_perm[i].want[0] = v; return 0; }
     return manage_in(g_perm, &g_np, name, &v, 1, 0) ? 0 : -1;
 }
 
@@ -296,6 +389,17 @@ static void reapply_in(managed_t *list, int count, unsigned numid) {
             long long cur[MAX_VALUES] = { 0 };
             if (ctl_read_t(numid, cur, m->count, m->enumerated) == 0 && memcmp(cur, m->want, sizeof(long long) * m->nwant) == 0) continue;
         }
+        // Budget: 5 re-applies a second. A driver that normalises our value, or another writer that insists, would
+        // otherwise keep the daemon re-writing for ever and starve everything else (audit, 19 Oct).
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec < m->paused_until.tv_sec) continue;
+        if (now.tv_sec != m->reapply_window.tv_sec) { m->reapply_window = now; m->reapplies = 0; }
+        if (++m->reapplies > 5) {
+            m->paused_until.tv_sec = now.tv_sec + 10;
+            LOGE("'%s' won't keep our value: left alone for 10 s", m->name);
+            continue;
+        }
         LOGW("'%s' rewritten by someone else, re-applying", m->name);
         ctl_write(m, m->want, m->nwant);
     }
@@ -318,7 +422,8 @@ static void reassert_device_mutes(void) {
 static void drain_ctl_events(void) {
     struct snd_ctl_event ev;
     int route_changed = 0;
-    while (g_ctl >= 0 && read(g_ctl, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
+    // At most 64 events per turn: the main loop (socket, keys, escape gesture) gets its turn between bursts
+    for (int k = 0; k < 64 && g_ctl >= 0 && read(g_ctl, &ev, sizeof(ev)) == (ssize_t)sizeof(ev); k++) {
         if (ev.type == SNDRV_CTL_EVENT_ELEM && (ev.data.elem.mask & SNDRV_CTL_EVENT_MASK_VALUE)
             && ev.data.elem.mask != SNDRV_CTL_EVENT_MASK_REMOVE) {
             on_ctl_event(ev.data.elem.id.numid);
@@ -429,7 +534,7 @@ static void handle_line(int fd, char *line) {
             strncat(names, g_m[i].name, sizeof(names) - strlen(names) - 2);
             strncat(names, ";", sizeof(names) - strlen(names) - 1);
         }
-        reply(fd, "OK call=%d session=%d managed=%d silence=%d %s", g_call, g_session, g_nm, g_np, names);
+        reply(fd, "OK call=%d session=%d managed=%d silence=%d safe=%d %s", g_call, g_session, g_nm, g_np, g_safe, names);
     } else if (strcmp(cmd, "SET") == 0) {
         char *key = strtok(NULL, " ");
         char *val = strtok(NULL, "");          // rest of line: control names contain spaces
@@ -473,7 +578,8 @@ static void handle_line(int fd, char *line) {
         reply(fd, "OK %s", t);
     } else if (strcmp(cmd, "POWERKEY") == 0) {          // POWERKEY 1|0: box mode blocks the power button
         char *v = strtok(NULL, " ");
-        reply(fd, "OK %d", box_power_block(v && atoi(v) == 1));
+        int n = box_power_block(v && atoi(v) == 1);
+        if (n < 0) reply(fd, "ERR no escape gesture on this phone"); else reply(fd, "OK %d", n);
     } else if (strcmp(cmd, "SCREEN_OFF") == 0 || strcmp(cmd, "WAKE") == 0) {
         reply(fd, box_screen(strcmp(cmd, "WAKE") == 0) == 0 ? "OK" : "ERR spawn failed");
     } else if (strcmp(cmd, "ROLE") == 0) {
@@ -546,6 +652,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) g_allowed_uid = (uid_t)atoi(argv[++i]);
         else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) { g_card = atoi(argv[++i]); card_given = 1; }
         else if (strcmp(argv[i], "--loopback") == 0) p.loopback = 1;
+        else if (strcmp(argv[i], "--safe") == 0) { g_safe = 1; LOGE("SAFE MODE: started after repeated failures; no mixer writes"); }
     }
 
     // The mixer: the given card, else the first one that opens. Without any, keep running (box mode, charge limit,
@@ -578,10 +685,11 @@ int main(int argc, char **argv) {
     // SIGCHLD stays default: box.c waits for its iptables runs and the loop reaps fire-and-forget children
     // (ignoring SIGCHLD made waitpid lose exit codes, and flipping it per wait raced with those children).
 
+    box_charge_init();         // first: a previous run may have died while cutting the charge (the battery would drain)
+    crumb_start();             // before any mixer write: did the last boot end while we were writing?
     clear_device_mutes();      // a previous run may have died mid-call
     audio_init((int)g_allowed_uid);
     box_keys_open();
-    box_charge_init();
     int uev = box_uevent_open();
     box_announce();            // the app reconnects at once (silence controls back within a second)
     box_log_capture();
@@ -599,9 +707,23 @@ int main(int argc, char **argv) {
         for (int i = 0; i < nk; i++) fds[4 + i] = (struct pollfd){ .fd = box_key_fd(i), .events = POLLIN };
         // 10 min heartbeat: re-check the charge limit even if a phone sends no battery uevents.
         box_reap();
-        int pr = poll(fds, (nfds_t)(4 + nk), 600000);
+        box_log_watch();
+        box_power_check();
+        int crumb = crumb_tick();
+        int pr = poll(fds, (nfds_t)(4 + nk), crumb >= 0 && crumb < 600000 ? crumb + 50 : 600000);
         if (pr < 0) { if (errno == EINTR) continue; break; }
-        if (pr == 0) { box_charge_check(); continue; }
+        if (pr == 0) { if (crumb < 0) box_charge_check(); continue; }
+
+        // A device that went away polls ready for ever (an audio DSP restart re-registers the sound card): the mixer's
+        // ids are stale too, so start over (the module restarts us, the app re-sends its profile); a vanished key
+        // device is dropped. Otherwise the loop would spin at 100 % CPU (audit, 19 Oct).
+        if (fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            LOGE("sound card gone: restarting");
+            close(g_ctl); g_ctl = -1;        // its ids may name other controls now: nothing is written on the way out
+            g_exit_code = 3;
+            break;
+        }
+        for (int i = 0; i < nk; i++) if (fds[4 + i].revents & (POLLERR | POLLHUP | POLLNVAL)) box_key_drop(i);
 
         if (fds[1].revents & POLLIN) drain_ctl_events();
         if (fds[3].revents & POLLIN) box_uevent(uev);
@@ -653,5 +775,5 @@ int main(int argc, char **argv) {
     }
     audio_shutdown();
     LOGI("simrelayd stopped");
-    return 0;
+    return g_exit_code;
 }

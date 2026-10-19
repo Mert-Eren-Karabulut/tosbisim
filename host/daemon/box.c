@@ -47,7 +47,8 @@ static const char *CAP_NODES[] = {
 };
 
 static int g_keys[BOX_MAX_KEYDEVS];
-static int g_power[BOX_MAX_KEYDEVS], g_grabbed[BOX_MAX_KEYDEVS];
+static int g_power[BOX_MAX_KEYDEVS], g_grabbed[BOX_MAX_KEYDEVS], g_volup[BOX_MAX_KEYDEVS], g_voldown[BOX_MAX_KEYDEVS];
+static struct timespec g_grab_until;            // dead-man: the block lapses unless the app confirms it again
 static int g_nkeys = 0;
 static int g_seq[6];          // last six volume presses: +1 up, -1 down
 static long long g_seq_t[6];
@@ -114,14 +115,20 @@ static const struct { const char *path; int stop; } CUT_NODES[] = {
 static int g_limit = 0;                // 0 or 100 = no limit
 static int g_cutting = 0;
 
+// access(W_OK) always passes for root: a read-only sysfs node would be picked, hide a working one, and report charge
+// control that isn't there (audit, 19 Oct). The node's own write bit says what the kernel allows.
+static int node_writable(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && (st.st_mode & S_IWUSR);
+}
 static const char *first_writable(const char *const *nodes, size_t n) {
-    for (size_t i = 0; i < n; i++) if (access(nodes[i], W_OK) == 0) return nodes[i];
+    for (size_t i = 0; i < n; i++) if (node_writable(nodes[i])) return nodes[i];
     return NULL;
 }
 static const char *cap_node(void) { return first_writable(CAP_NODES, sizeof(CAP_NODES) / sizeof(CAP_NODES[0])); }
 /** The first writable cut node (index into CUT_NODES), or -1. */
 static int cut_index(void) {
-    for (size_t i = 0; i < sizeof(CUT_NODES) / sizeof(CUT_NODES[0]); i++) if (access(CUT_NODES[i].path, W_OK) == 0) return (int)i;
+    for (size_t i = 0; i < sizeof(CUT_NODES) / sizeof(CUT_NODES[0]); i++) if (node_writable(CUT_NODES[i].path)) return (int)i;
     return -1;
 }
 static const char *cut_node(void) { int i = cut_index(); return i < 0 ? NULL : CUT_NODES[i].path; }
@@ -274,13 +281,18 @@ int box_keys_open(void) {
         snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
         int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) continue;
-        unsigned long keys[(KEY_MAX + 1) / (8 * sizeof(long)) + 1];
+        unsigned long keys[(KEY_MAX + 1) / (8 * sizeof(long)) + 1], types[EV_MAX / (8 * sizeof(long)) + 1];
         memset(keys, 0, sizeof(keys));
-        if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) >= 0 &&
+        memset(types, 0, sizeof(types));
+        ioctl(fd, EVIOCGBIT(0, sizeof(types)), types);
+        // Touch panels (absolute axes) can report a "power" key for wake gestures: never watched, never grabbed
+        if (!has_bit(types, EV_ABS) && ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) >= 0 &&
             (has_bit(keys, KEY_VOLUMEUP) || has_bit(keys, KEY_VOLUMEDOWN) || has_bit(keys, KEY_POWER))) {
             char name[64] = "?";
             ioctl(fd, EVIOCGNAME(sizeof(name)), name);
             g_power[g_nkeys] = has_bit(keys, KEY_POWER);
+            g_volup[g_nkeys] = has_bit(keys, KEY_VOLUMEUP);
+            g_voldown[g_nkeys] = has_bit(keys, KEY_VOLUMEDOWN);
             LOGI("box keys: watching %s (%s)%s", path, name, g_power[g_nkeys] ? " with the power key" : "");
             g_keys[g_nkeys++] = fd;
         } else {
@@ -293,14 +305,36 @@ int box_keys_open(void) {
 
 int box_key_fd(int i) { return i < g_nkeys ? g_keys[i] : -1; }
 
+/** A watched input device went away: stop polling it (its slot keeps the others' order; -1 is ignored by poll). */
+void box_key_drop(int i) {
+    if (i >= g_nkeys || g_keys[i] < 0) return;
+    LOGW("box keys: input device %d gone", i);
+    close(g_keys[i]);
+    g_keys[i] = -1;
+    g_grabbed[i] = 0;
+}
+
 // Box mode: the power button must not wake the screen (19 Oct: on the Redmi each press lit the screen for a
 // moment before box mode turned it off). Grabbing the key devices gives their events to us alone: Android never sees
 // the power key, the escape gesture still works (we read the volume keys from the same fd), and the hardware
 // long-press reset bypasses Android anyway. Released by POWERKEY 0, by the escape gesture, and by the kernel if we die.
+//
+// Only when the escape gesture can work (both volume keys watched): otherwise blocking the power key, with the screen
+// kept off, would lock the owner out (audit, 19 Oct). And a dead-man: the block lapses after 15 min unless the app
+// confirms it again (it does every minute while box mode is on), so a stuck app can't leave the phone sealed.
 int box_power_block(int on) {
+    if (on) {
+        int up = 0, down = 0;
+        for (int i = 0; i < g_nkeys; i++) if (g_keys[i] >= 0) { up |= g_volup[i]; down |= g_voldown[i]; }
+        if (!up || !down) { LOGW("power key not blocked: the volume keys aren't both watched (no escape gesture)"); return -1; }
+        clock_gettime(CLOCK_MONOTONIC, &g_grab_until);
+        g_grab_until.tv_sec += 15 * 60;
+    } else {
+        g_grab_until.tv_sec = 0;
+    }
     int n = 0;
     for (int i = 0; i < g_nkeys; i++) {
-        if (!g_power[i] || g_grabbed[i] == on) continue;
+        if (g_keys[i] < 0 || !g_power[i] || g_grabbed[i] == on) continue;
         if (ioctl(g_keys[i], EVIOCGRAB, on ? 1 : 0) == 0) { g_grabbed[i] = on; n++; }
         else LOGW("power key %s: %s", on ? "grab" : "release", strerror(errno));
     }
@@ -309,6 +343,16 @@ int box_power_block(int on) {
 }
 int box_key_count(void) { return g_nkeys; }
 
+/** The dead-man check (main loop): an unconfirmed block is released. */
+void box_power_check(void) {
+    if (g_grab_until.tv_sec == 0) return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (now.tv_sec < g_grab_until.tv_sec) return;
+    LOGW("power key block not confirmed for 15 min: released");
+    box_power_block(0);
+}
+
 static void broadcast(const char *action) {
     char *argv[] = { "/system/bin/am", "broadcast", "--user", "0", "-a", (char *)action, "-n", ESCAPE_RECEIVER, NULL };
     spawn(argv);
@@ -316,28 +360,85 @@ static void broadcast(const char *action) {
 
 // Persistent log: logcat's ring buffer (5 MiB) rolls over within hours on a busy day, losing the host's side of
 // a trip (16 Oct 2026). logcat itself writes a rotated copy (2 MiB x 5) of our tags + call/voice/hotspot tags.
+#define LOG_FILE "/data/adb/tosbisim/logs/host.log"
+#define LOG_PIDF "/data/adb/tosbisim/logs/logcat.pid"
+
+static void log_stop(void) {
+    // One capture at a time: stop the running logcat (pid file; a pattern kill would match itself).
+    int old = read_int(LOG_PIDF);
+    if (old <= 1) return;
+    char comm[64] = "", path[64];
+    snprintf(path, sizeof(path), "/proc/%d/comm", old);
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) { ssize_t n = read(fd, comm, sizeof(comm) - 1); close(fd); if (n > 0) comm[n] = 0; }
+    if (strncmp(comm, "logcat", 6) == 0) kill(old, SIGTERM);
+}
+
+/** since: "MM-DD hh:mm:ss.mmm" to resume after the file's last line (no copy of what it already holds), or NULL. */
+static struct timespec g_log_started;            // the running capture's start (monotonic)
+
+static void log_spawn(const char *since) {
+    char *argv[24];
+    int a = 0;
+    const char *head[] = { "/system/bin/logcat", "-b", "main,system,crash", "-v", "time", "-f", LOG_FILE, "-r", "2048", "-n", "5" };
+    for (size_t i = 0; i < sizeof(head) / sizeof(head[0]); i++) argv[a++] = (char *)head[i];
+    if (since) { argv[a++] = "-T"; argv[a++] = (char *)since; }
+    const char *tags[] = { "-s", "SimRelayHost:I", "simrelayd:I", "voice:D", "Telecom:I", "SemWifiApTimeOutImpl:I", "Tethering:W",
+        "AndroidRuntime:E" };
+    for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) argv[a++] = (char *)tags[i];
+    argv[a] = NULL;
+    pid_t pid;
+    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) != 0) { LOGW("log capture: spawn failed"); return; }
+    FILE *f = fopen(LOG_PIDF, "we");
+    if (f) { fprintf(f, "%d\n", pid); fclose(f); }
+    clock_gettime(CLOCK_MONOTONIC, &g_log_started);
+    LOGI("log capture -> " LOG_FILE " (pid %d%s%s)", pid, since ? ", from " : "", since ? since : "");
+}
+
 void box_log_capture(void) {
     mkdir("/data/adb/tosbisim", 0700);
     mkdir("/data/adb/tosbisim/logs", 0700);
-    // One capture at a time: stop the previous daemon run's logcat (pid file; a pattern kill would match itself).
-    const char *pidf = "/data/adb/tosbisim/logs/logcat.pid";
-    int old = read_int(pidf);
-    if (old > 1) {
-        char comm[64] = "", path[64];
-        snprintf(path, sizeof(path), "/proc/%d/comm", old);
-        int fd = open(path, O_RDONLY | O_CLOEXEC);
-        if (fd >= 0) { ssize_t n = read(fd, comm, sizeof(comm) - 1); close(fd); if (n > 0) comm[n] = 0; }
-        if (strncmp(comm, "logcat", 6) == 0) kill(old, SIGTERM);
+    log_stop();
+    log_spawn(NULL);
+}
+
+// logcat can stay alive while logd no longer feeds it (S20 FE, 19 Oct 2026: nothing written after 19:32 although
+// the app kept logging), and diagnostics read this file. Nothing written for 10 min: restart the capture from the
+// last line's time. A quiet host only costs a restart every 10 min.
+void box_log_watch(void) {
+    static struct timespec last;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (last.tv_sec && now.tv_sec - last.tv_sec < 60) return;
+    last = now;
+    if (now.tv_sec - g_log_started.tv_sec < 600) return;   // a capture gets 10 min before it is judged
+    struct stat st;
+    if (stat(LOG_FILE, &st) != 0) return;
+    long age = (long)(time(NULL) - st.st_mtime);
+    if (age < 600) return;                        // (negative after a clock change: also left alone)
+    char tail[2048] = "", since[19] = "";
+    int fd = open(LOG_FILE, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        off_t off = st.st_size > (off_t)sizeof(tail) - 1 ? st.st_size - (off_t)sizeof(tail) + 1 : 0;
+        ssize_t n = pread(fd, tail, sizeof(tail) - 1, off);
+        close(fd);
+        if (n > 0) {
+            tail[n] = 0;
+            // The newest whole line with a "-v time" stamp ("MM-DD hh:mm:ss.mmm"); the last one may be cut short.
+            for (char *p = tail + n; p > tail; ) {
+                *p = 0;
+                char *line = p;
+                while (line > tail && line[-1] != '\n') line--;
+                if (line > tail && strlen(line) >= 18 && line[2] == '-' && line[5] == ' ' && line[8] == ':' && line[14] == '.') {
+                    memcpy(since, line, 18); since[18] = 0; break;
+                }
+                p = line > tail ? line - 1 : tail;
+            }
+        }
     }
-    char *argv[] = { "/system/bin/logcat", "-b", "main,system,crash", "-v", "time",
-        "-f", "/data/adb/tosbisim/logs/host.log", "-r", "2048", "-n", "5",
-        "-s", "SimRelayHost:I", "simrelayd:I", "voice:D", "Telecom:I", "SemWifiApTimeOutImpl:I", "Tethering:W",
-        "AndroidRuntime:E", NULL };
-    pid_t pid;
-    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) != 0) { LOGW("log capture: spawn failed"); return; }
-    FILE *f = fopen(pidf, "we");
-    if (f) { fprintf(f, "%d\n", pid); fclose(f); }
-    LOGI("log capture -> /data/adb/tosbisim/logs/host.log (pid %d)", pid);
+    LOGW("log capture: nothing written for %ld s, restarting it", age);
+    log_stop();
+    log_spawn(since[0] ? since : NULL);
 }
 
 void box_announce(void) { broadcast("dev.simrelay.host.DAEMON_UP"); }

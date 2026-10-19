@@ -41,7 +41,7 @@ import java.util.concurrent.Executors
 class SetupActivity : Activity() {
     private enum class Mark(val glyph: String) { OK("✓"), WARN("!"), FAIL("✗"), WAIT("…") }
     private data class Check(val title: String, val mark: Mark, val detail: String)
-    private enum class Act { CHECK_ROOT, INSTALL, RESTART, REINSTALL, DEV_OPTIONS, MAGISK_GUIDE, FIX, OPEN_PAIRING, PAIR_OTHER }
+    private enum class Act { CHECK_ROOT, INSTALL, RESTART, REINSTALL, DEV_OPTIONS, MAGISK_GUIDE, FIX, OPEN_PAIRING, PAIR_OTHER, LOCK_SETTINGS }
     private data class Btn(val label: String, val act: Act?, val enabled: Boolean = true)
     private data class Card(val title: String, val body: String, val mark: Mark, val primary: Btn? = null, val secondary: Btn? = null,
                             val countdown: Boolean = false)
@@ -208,6 +208,9 @@ class SetupActivity : Activity() {
         val sims = runCatching { Sims.status(this) }.getOrDefault(emptyList())
         val v = Compat.verdict(this)
         val permsOk = runtimeMissing.isEmpty() && sms && battery && silent
+        // A PIN/pattern/password: after a restart or power cut TosbiSim can't start until someone unlocks the phone
+        // (credential-encrypted storage), which nobody can on a phone without a screen (audit, 19 Oct).
+        val locked = getSystemService(KeyguardManager::class.java).isDeviceSecure
         val daemonOk = d?.startsWith("OK") == true
         val checks = listOf(
             Check(getString(R.string.c_phone), Mark.OK, getString(R.string.c_phone_detail, v.name, Build.VERSION.RELEASE, Compat.soc())),
@@ -218,6 +221,7 @@ class SetupActivity : Activity() {
             Check(getString(R.string.c_permissions), if (permsOk) Mark.OK else Mark.WARN,
                 if (permsOk) getString(R.string.perm_ok) else problems(runtimeMissing, sms, battery, silent, true).joinToString(" ")),
             Check(getString(R.string.c_bluetooth), if (btOn) Mark.OK else Mark.FAIL, getString(if (btOn) R.string.ble_ok else R.string.ble_off)),
+            Check(getString(R.string.c_lock), if (locked) Mark.WARN else Mark.OK, getString(if (locked) R.string.lock_on else R.string.lock_off)),
             Check(getString(R.string.c_iphone), if (paired != null && Relay.clientConnected()) Mark.OK else Mark.WARN,
                 when { paired == null -> getString(R.string.iphone_none); Relay.clientConnected() -> getString(R.string.iphone_connected, paired)
                     else -> getString(R.string.iphone_away, paired) }),
@@ -232,6 +236,8 @@ class SetupActivity : Activity() {
         fun at(step: Int, card: Card) = Model(sub, step, 6, card, checks)
         val fixing = Onboarding.fixing
         val pairing = Relay.pairingOpen()
+        // Paired but not finished: another iPhone can still take over (a phone passed on, a new iPhone).
+        val other = if (pairing) null else Btn(getString(R.string.btn_pair_other), Act.PAIR_OTHER)
         return when {
             // A reinstall from this screen: its progress and result before anything else (a restart finishes it).
             Onboarding.install == Onboarding.Install.BUSY ->
@@ -248,18 +254,23 @@ class SetupActivity : Activity() {
             !permsOk || !btOn -> at(5, Card(getString(R.string.fix_title),
                 (problems(runtimeMissing, sms, battery, silent, btOn) + getString(R.string.fix_hint)).joinToString("\n"), Mark.WARN,
                 Btn(getString(if (fixing) R.string.btn_fixing else R.string.btn_fix), if (fixing) null else Act.FIX, !fixing)))
-            paired == null -> at(5, Card(getString(R.string.pair_title), getString(R.string.pair_body, btName(bt)), Mark.WARN,
-                if (Relay.pairingOpen()) null else Btn(getString(R.string.btn_open_pairing), Act.OPEN_PAIRING), countdown = true))
+            // Unpaired: ready for the first iPhone, nothing to open.
+            locked -> at(5, Card(getString(R.string.lock_title), getString(R.string.lock_body), Mark.WARN,
+                Btn(getString(R.string.btn_lock_settings), Act.LOCK_SETTINGS)))
+            paired == null -> at(5, Card(getString(R.string.pair_title), getString(R.string.pair_body, btName(bt)), Mark.WARN, countdown = true))
             sims.isEmpty() -> at(6, Card(getString(R.string.sim_title), getString(R.string.sim_body), Mark.FAIL))
             sims.any { it.lock != Sim.Lock.UNLOCKED } ->
                 at(6, Card(getString(R.string.sim_title), getString(R.string.sim_locked, sims.first { it.lock != Sim.Lock.UNLOCKED }.slot + 1), Mark.WARN))
             Daemon.hasProfile() && !VoiceGate.fullVoice -> at(6, Card(getString(R.string.next_title),
-                getString(if (VoiceGate.passedBeforeUpdate) R.string.next_retest else R.string.next_test, paired), Mark.WARN, countdown = pairing))
-            !Daemon.hasProfile() && !Box.on -> at(6, Card(getString(R.string.next_title), getString(R.string.next_basic, paired), Mark.WARN, countdown = pairing))
-            !Box.on -> at(6, Card(getString(R.string.next_title), getString(R.string.next_box, paired), Mark.WARN, countdown = pairing))
+                getString(if (VoiceGate.passedBeforeUpdate) R.string.next_retest else R.string.next_test, paired), Mark.WARN,
+                secondary = other, countdown = pairing))
+            !Daemon.hasProfile() && !Box.on -> at(6, Card(getString(R.string.next_title), getString(R.string.next_basic, paired), Mark.WARN,
+                secondary = other, countdown = pairing))
+            !Box.on -> at(6, Card(getString(R.string.next_title), getString(R.string.next_box, paired), Mark.WARN,
+                secondary = other, countdown = pairing))
             // A different iPhone may pair while the window is open (it then replaces this one): show the countdown.
             else -> Model(sub, 0, 0, Card(getString(R.string.done_title), getString(R.string.done_body), Mark.OK,
-                secondary = if (pairing) null else Btn(getString(R.string.btn_pair_other), Act.PAIR_OTHER), countdown = pairing), checks)
+                secondary = other, countdown = pairing), checks)
         }
     }
 
@@ -347,6 +358,8 @@ class SetupActivity : Activity() {
                 .setNegativeButton(R.string.btn_cancel, null).show()
             Act.DEV_OPTIONS -> runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                 .onFailure { runCatching { startActivity(Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)) } }
+            Act.LOCK_SETTINGS -> runCatching { startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
+                .onFailure { runCatching { startActivity(Intent(Settings.ACTION_SETTINGS)) } }
             Act.MAGISK_GUIDE -> runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://topjohnwu.github.io/Magisk/install.html"))) }
         }
     }
@@ -406,7 +419,11 @@ class SetupActivity : Activity() {
     private fun updateCountdown() {
         val t = countdown ?: return
         val left = Relay.pairingSecondsLeft()
-        t.text = if (left > 0) getString(R.string.pair_open_left, "%d:%02d".format(left / 60, left % 60)) else getString(R.string.pair_closed)
+        t.text = when {
+            Relay.pairedClient() == null -> getString(R.string.pair_ready)
+            left > 0 -> getString(R.string.pair_open_left, "%d:%02d".format(left / 60, left % 60))
+            else -> getString(R.string.pair_closed)
+        }
     }
 
     private fun row(k: Check) = LinearLayout(this).apply {

@@ -31,7 +31,7 @@ object RemoteLink {
     private lateinit var onEnvelope: (ByteArray) -> Unit
     private lateinit var onPeer: (present: Boolean, wasThere: Boolean) -> Unit
     private val thread = HandlerThread("remote").apply { start() }
-    private val h = Handler(thread.looper)
+    private val h = Bg.handler("remote", thread.looper)
     private val http = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS).build()
     private var ws: WebSocket? = null
     private var gen = 0                       // bumps on every (re)connect: callbacks from an old socket are ignored

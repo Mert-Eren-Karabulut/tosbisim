@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
 object RemoteCall {
     private const val TAG = "SimRelayHost"
     private const val REFRESH_S = 240L
-    private val setup = Executors.newSingleThreadExecutor()
+    private val setup = Bg.single("remote-call")
     private val timers = Executors.newSingleThreadScheduledExecutor()
     private val gen = AtomicInteger()
     @Volatile private var session: Session? = null
