@@ -69,9 +69,12 @@ object Daemon {
     private fun checkCallAudio(reply: String?, seconds: Long) {
         if (reply == null || seconds < 10 || !VoiceGate.fullVoice) return
         fun num(k: String) = Regex("\\b$k=(-?\\d+)").find(reply)?.groupValues?.get(1)?.toLongOrNull() ?: 0
-        val cap = num("cap"); val played = num("played")
-        if (cap > 0 && played > 0) return
-        Diag.event("call_audio_failed", org.json.JSONObject().put("what", if (cap == 0L) "no capture" else "nothing played")
+        val cap = num("cap"); val played = num("played"); val voiced = num("voiced")
+        // Captured but silent for a whole longer call: the caller's audio never reached us (20 Oct 2026: the far phone's
+        // own host had unlinked its mic; a wrong capture route looks the same)
+        val silent = cap > 0 && voiced == 0L && seconds >= 30
+        if (cap > 0 && played > 0 && !silent) return
+        Diag.event("call_audio_failed", org.json.JSONObject().put("what", when { cap == 0L -> "no capture"; played == 0L -> "nothing played"; else -> "caller silent" })
             .put("seconds", seconds).put("daemon", reply))
     }
 

@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.5",
+    "code": 41,
+    "en": "Calls answered on the host phone itself are now left alone: only calls your iPhone made or answered go through TosbiSim. Before, a call taken on the host's own screen lost its microphone.\nCall audio no longer drops if a diagnostic tool checks on the host during a call.\nA call where the caller's voice never arrives is now reported (with diagnostics on), so it can be fixed.",
+    "tr": "Ana cihazın kendisinde yanıtlanan aramalara artık dokunulmuyor: yalnızca iPhone'unuzun yaptığı veya yanıtladığı aramalar TosbiSim üzerinden geçer. Önceden ana cihazın kendi ekranından açılan bir aramanın mikrofonu kesiliyordu.\nArama sırasında bir tanılama aracı ana cihazı yoklarsa arama sesi artık kesilmiyor.\nArayanın sesinin hiç gelmediği bir arama artık bildiriliyor (tanılama açıksa), böylece düzeltilebiliyor."
+  },
+  {
     "version": "0.12.4",
     "code": 40,
     "en": "Helps more phones get full voice: with diagnostics on, the host sends a one-time description of its sound chip (the names and ranges of its audio settings; nothing is changed, and nothing about you or your calls is included), so call audio can be made to work on phones we have never had in hand.",

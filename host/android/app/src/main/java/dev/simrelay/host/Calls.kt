@@ -22,7 +22,10 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Bridges Telecom calls (seen by CallMonitor, our non-UI InCallService) to protocol CallEvents, and
  * carries out the client's CallAction / Dial. Also drives the audio daemon: only an ACTIVE (or DIALING) call has
- * its routes and mutes applied, and only with full voice on or for the guided call test (VoiceGate).
+ * its routes and mutes applied, only with full voice on or for the guided call test (VoiceGate), and only for a call
+ * the iPhone owns: one it dialled or answered. A call answered on the host itself (someone holding it, box mode off)
+ * stays an ordinary phone call: relaying it would cut the host's mic out and feed the caller silence (20 Oct 2026, a
+ * host restarted by its keep-alive mid-call did exactly that).
  */
 object CallRegistry {
     private const val TAG = "SimRelayHost"
@@ -31,9 +34,29 @@ object CallRegistry {
     private val clientUuids = ConcurrentHashMap<String, String>()   // call id -> client's CallKit UUID
     private val lastSent = ConcurrentHashMap<String, CallEvent.State>() // send state changes only
     @Volatile private var pendingDial: Pair<String, Long>? = null     // client uuid, when requested
+    private val owned: MutableSet<String> = ConcurrentHashMap.newKeySet()   // call ids the iPhone dialled or answered
     private lateinit var app: Context
 
     fun init(ctx: Context) { app = ctx.applicationContext }
+
+    // Ownership outlives a host restart mid-call (keep-alive, update, crash): keyed by Telecom's creation time, which
+    // the same call keeps, in a small prefs set pruned of anything older than a day.
+    private val prefs get() = app.getSharedPreferences("calls", Context.MODE_PRIVATE)
+    private fun key(call: Call) = "${call.details.creationTimeMillis}"
+    private fun own(call: Call, id: String) {
+        owned.add(id)
+        val now = System.currentTimeMillis()
+        val keep = prefs.getStringSet("owned", emptySet()).orEmpty().filter { now - (it.toLongOrNull() ?: 0) < 86_400_000L }
+        prefs.edit().putStringSet("owned", (keep + key(call)).toSet()).apply()
+    }
+    /** The iPhone dialled or answered it (a conference: any of its calls). */
+    private fun isOwned(call: Call): Boolean =
+        ids[call] in owned || call.children.any { ids[it] in owned } || call.parent?.let { ids[it] in owned } == true
+
+    private fun disown(call: Call, id: String) {
+        owned.remove(id)
+        prefs.edit().putStringSet("owned", prefs.getStringSet("owned", emptySet()).orEmpty() - key(call)).apply()
+    }
 
     fun added(call: Call) {
         val id = UUID.randomUUID().toString()
@@ -44,6 +67,10 @@ object CallRegistry {
             System.currentTimeMillis() - pd.second < 15_000) {
             clientUuids[id] = pd.first
             pendingDial = null
+            own(call, id)
+        } else if (key(call) in prefs.getStringSet("owned", emptySet()).orEmpty()) {
+            owned.add(id)                                   // the iPhone's call, from before this process started
+            Log.i(TAG, "call $id: the iPhone's, from before a host restart")
         }
         changed(call)
     }
@@ -53,14 +80,18 @@ object CallRegistry {
         if (lastSent.put(e.callId, e.state) != e.state) Relay.callEvent(e)
         // Audio runs while a call is ACTIVE, and for outgoing calls already while DIALING: the network's early
         // media (ringback, "number unavailable" announcements) then reaches the iPhone instead of the host.
-        val audible = byId.values.firstOrNull { it.stateCompat == Call.STATE_ACTIVE }
-            ?: byId.values.firstOrNull { it.stateCompat == Call.STATE_DIALING }
-        if (audible != null && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })) {
+        // The iPhone's call first: a call taken on the host can be active while the iPhone's own waits on hold.
+        val active = byId.values.filter { it.stateCompat == Call.STATE_ACTIVE }
+        val dialing = byId.values.filter { it.stateCompat == Call.STATE_DIALING }
+        val audible = active.firstOrNull(::isOwned) ?: active.firstOrNull() ?: dialing.firstOrNull(::isOwned) ?: dialing.firstOrNull()
+        if (audible != null && isOwned(audible) && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })) {
             BasicSilence.set(app, false)
             Daemon.callActive(Daemon.profile()?.sessionForSlot(maxOf(slotOf(audible), 0)) ?: (maxOf(slotOf(audible), 0) + 1))
         } else {
             Daemon.callIdle()
-            BasicSilence.set(app, audible != null)       // a call without relayed audio: keep the host itself quiet
+            // A call without relayed audio: in box mode (in a drawer, nobody can answer on it) keep the host quiet;
+            // otherwise someone is holding the phone and it is their call.
+            BasicSilence.set(app, audible != null && Box.on)
         }
     }
 
@@ -69,6 +100,7 @@ object CallRegistry {
         if (lastSent.remove(id) != CallEvent.State.ENDED) Relay.callEvent(event(call, forceEnded = true, id = id))
         byId.remove(id)
         clientUuids.remove(id)
+        disown(call, id)
         if (byId.values.none { it.stateCompat == Call.STATE_ACTIVE || it.stateCompat == Call.STATE_DIALING }) Daemon.callIdle()
     }
 
@@ -79,7 +111,7 @@ object CallRegistry {
         val call = byId[a.callId] ?: return "no such call ${a.callId}"
         Log.i(TAG, "client action ${a.action} on ${a.callId}")
         when (a.action) {
-            CallAction.Action.ANSWER -> call.answer(VideoProfile.STATE_AUDIO_ONLY)
+            CallAction.Action.ANSWER -> { own(call, a.callId); call.answer(VideoProfile.STATE_AUDIO_ONLY) }
             CallAction.Action.REJECT -> call.reject(false, null)
             CallAction.Action.HANG_UP -> call.disconnect()
             CallAction.Action.HOLD -> call.hold()

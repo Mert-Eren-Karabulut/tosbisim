@@ -654,13 +654,40 @@ static void handle_line(int fd, char *line) {
     }
 }
 
-static int peer_allowed(int fd) {
+// The peer's uid if it may talk to us (root or the host app), else -1.
+static int peer_uid(int fd) {
     struct ucred cred;
     socklen_t len = sizeof(cred);
-    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) < 0) return 0;
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) < 0) return -1;
     int ok = cred.uid == 0 || cred.uid == g_allowed_uid;
     LOGI("client pid=%d uid=%d %s", cred.pid, cred.uid, ok ? "accepted" : "REJECTED");
-    return ok;
+    return ok ? (int)cred.uid : -1;
+}
+
+// Two connections: the host app's (the owner: a new one replaces a stale one, and losing it mid-call restores the
+// mixer) and one for root tools (simrelayd --client, adb). A tool's query never displaces the app nor, by closing,
+// ends a call's routing: it did both on 20 Oct 2026 (an AUDIO? during a call restored every control).
+typedef struct { int fd; int owner; size_t used; char buf[1024]; } conn_t;
+
+static void conn_close(conn_t *c) { if (c->fd >= 0) close(c->fd); c->fd = -1; c->used = 0; }
+
+// Read what's there and run its lines; 0 when the peer has gone.
+static int conn_read(conn_t *c) {
+    ssize_t n = read(c->fd, c->buf + c->used, sizeof(c->buf) - 1 - c->used);
+    if (n <= 0) return 0;
+    c->used += (size_t)n;
+    c->buf[c->used] = 0;
+    char *start = c->buf, *nl;
+    while ((nl = strchr(start, '\n'))) {
+        *nl = 0;
+        if (nl > start && nl[-1] == '\r') nl[-1] = 0;
+        handle_line(c->fd, start);
+        start = nl + 1;
+    }
+    c->used = strlen(start);
+    memmove(c->buf, start, c->used + 1);
+    if (c->used == sizeof(c->buf) - 1) c->used = 0;   // overlong line: drop it
+    return 1;
 }
 
 static socklen_t abstract_addr(struct sockaddr_un *a) {
@@ -749,22 +776,20 @@ int main(int argc, char **argv) {
     box_log_capture();
     LOGI("simrelayd %s up: card %d, socket @%s, allowed uid %d", VERSION, g_card, SOCK_NAME, (int)g_allowed_uid);
 
-    int client = -1;
-    char buf[1024];
-    size_t used = 0;
+    static conn_t conns[2] = { { .fd = -1, .owner = 1 }, { .fd = -1, .owner = 0 } };   // the app's, a root tool's
     while (!g_stop) {
-        struct pollfd fds[4 + BOX_MAX_KEYDEVS] = {
-            { .fd = ls, .events = POLLIN }, { .fd = g_ctl, .events = POLLIN }, { .fd = client, .events = POLLIN },
-            { .fd = uev, .events = POLLIN },
+        struct pollfd fds[5 + BOX_MAX_KEYDEVS] = {
+            { .fd = ls, .events = POLLIN }, { .fd = g_ctl, .events = POLLIN }, { .fd = conns[0].fd, .events = POLLIN },
+            { .fd = uev, .events = POLLIN }, { .fd = conns[1].fd, .events = POLLIN },
         };
         int nk = box_key_count();
-        for (int i = 0; i < nk; i++) fds[4 + i] = (struct pollfd){ .fd = box_key_fd(i), .events = POLLIN };
+        for (int i = 0; i < nk; i++) fds[5 + i] = (struct pollfd){ .fd = box_key_fd(i), .events = POLLIN };
         // 10 min heartbeat: re-check the charge limit even if a phone sends no battery uevents.
         box_reap();
         box_log_watch();
         box_power_check();
         int crumb = crumb_tick();
-        int pr = poll(fds, (nfds_t)(4 + nk), crumb >= 0 && crumb < 600000 ? crumb + 50 : 600000);
+        int pr = poll(fds, (nfds_t)(5 + nk), crumb >= 0 && crumb < 600000 ? crumb + 50 : 600000);
         if (pr < 0) { if (errno == EINTR) continue; break; }
         if (pr == 0) { if (crumb < 0) box_charge_check(); continue; }
 
@@ -777,43 +802,32 @@ int main(int argc, char **argv) {
             g_exit_code = 3;
             break;
         }
-        for (int i = 0; i < nk; i++) if (fds[4 + i].revents & (POLLERR | POLLHUP | POLLNVAL)) box_key_drop(i);
+        for (int i = 0; i < nk; i++) if (fds[5 + i].revents & (POLLERR | POLLHUP | POLLNVAL)) box_key_drop(i);
 
         if (fds[1].revents & POLLIN) drain_ctl_events();
         if (fds[3].revents & POLLIN) box_uevent(uev);
-        for (int i = 0; i < nk; i++) if (fds[4 + i].revents & POLLIN) box_key_event(fds[4 + i].fd);
+        for (int i = 0; i < nk; i++) if (fds[5 + i].revents & POLLIN) box_key_event(fds[5 + i].fd);
 
         if (fds[0].revents & POLLIN) {
             int c = accept4(ls, NULL, NULL, SOCK_CLOEXEC);
-            if (c >= 0 && !peer_allowed(c)) { close(c); c = -1; }
+            int uid = c >= 0 ? peer_uid(c) : -1;
+            if (c >= 0 && uid < 0) { close(c); c = -1; }
             if (c >= 0) {
-                if (client >= 0) { reply(client, "ERR replaced by a new client"); close(client); }
-                client = c;
-                used = 0;
+                // Without --uid (development) root is the owner, as before
+                int owner = g_allowed_uid == (uid_t)-1 || (uid_t)uid == g_allowed_uid;
+                conn_t *slot = owner ? &conns[0] : &conns[1];
+                if (slot->fd >= 0) { reply(slot->fd, "ERR replaced by a new client"); conn_close(slot); }
+                slot->fd = c;
             }
         }
 
-        if (client >= 0 && (fds[2].revents & (POLLIN | POLLHUP | POLLERR))) {
-            ssize_t n = read(client, buf + used, sizeof(buf) - 1 - used);
-            if (n <= 0) {
-                LOGI("client gone");
-                if (g_call) restore_all("client disconnected mid-call");
-                close(client);
-                client = -1;
-                continue;
-            }
-            used += (size_t)n;
-            buf[used] = 0;
-            char *start = buf, *nl;
-            while ((nl = strchr(start, '\n'))) {
-                *nl = 0;
-                if (nl > start && nl[-1] == '\r') nl[-1] = 0;
-                handle_line(client, start);
-                start = nl + 1;
-            }
-            used = strlen(start);
-            memmove(buf, start, used + 1);
-            if (used == sizeof(buf) - 1) used = 0;   // overlong line: drop it
+        for (int k = 0; k < 2; k++) {
+            conn_t *c = &conns[k];
+            if (c->fd < 0 || !(fds[k == 0 ? 2 : 4].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+            if (conn_read(c)) continue;
+            LOGI("%s gone", c->owner ? "client" : "tool client");
+            if (c->owner && g_call) restore_all("client disconnected mid-call");
+            conn_close(c);
         }
     }
 
