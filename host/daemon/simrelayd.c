@@ -21,8 +21,10 @@
 //                                                   withholds TetheredClient details without NETWORK_SETTINGS)
 //   SET keys: capture, rec_config, inject.1, inject.2, mute.tx, mute.rx, mute.vsid, mute.ramp
 //   HAS <control>  -> OK count=n | ERR       (auto profiles: confirm a control exists on this card)
+//   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak=   (call test totals)
-//   Box mode (box.c): SCREEN_OFF | WAKE | ROLE <role> <pkg> | CHARGE <percent> | CHARGE? -> OK <node>|ERR
+//   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <percent> | CHARGE? -> OK <node>|ERR
+//                     NETBLOCK <uid> <0|1> (iptables chain tosbisim_block)
 //                     + the Volume Up x3 / Volume Down x3 escape gesture, reported to the app by broadcast
 // Debug client: simrelayd --client "CMD|SLEEP n|CMD..." (one connection)
 
@@ -80,14 +82,15 @@ static int g_nm = 0;
 static managed_t g_perm[MAX_MANAGED];
 static int g_np = 0;
 static int g_call = 0, g_session = 0;
+static unsigned g_remutes = 0;        // device-mute re-asserts this call (see drain_ctl_events)
 static volatile sig_atomic_t g_stop = 0;
 
 static struct {
     char capture[NAME_LEN], rec_config[NAME_LEN], inject1[NAME_LEN], inject2[NAME_LEN];
     char mute_tx[NAME_LEN], mute_rx[NAME_LEN];
     long long vsid, ramp;
-    int capture_pcm, inject_pcm, inject_rate, inject_channels, loopback;
-} p = { .mute_tx = "Voice Tx Device Mute", .mute_rx = "Voice Rx Device Mute",
+    int capture_pcm, capture_rate, capture_channels, inject_pcm, inject_rate, inject_channels, loopback;
+} p = { .capture_rate = 16000, .capture_channels = 1, .mute_tx = "Voice Tx Device Mute", .mute_rx = "Voice Rx Device Mute",
         .vsid = 4294967295LL /* ALL_SESSION_VSID */, .ramp = 20,
         .capture_pcm = 0, .inject_pcm = 23, .inject_rate = 48000, .inject_channels = 2 };
 
@@ -95,6 +98,7 @@ static struct {
 
 static int ctl_info(const char *name, struct snd_ctl_elem_info *info) {
     memset(info, 0, sizeof(*info));
+    if (g_ctl < 0 || !name || !*name) return -1;     // no mixer on this phone, or no control named
     info->id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
     strncpy((char *)info->id.name, name, sizeof(info->id.name) - 1);
     return ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_INFO, info);
@@ -104,7 +108,7 @@ static int ctl_read_t(unsigned numid, long long *out, unsigned count, int enumer
     struct snd_ctl_elem_value v;
     memset(&v, 0, sizeof(v));
     v.id.numid = numid;
-    if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) < 0) return -1;
+    if (g_ctl < 0 || ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) < 0) return -1;
     for (unsigned i = 0; i < count && i < MAX_VALUES; i++)
         out[i] = enumerated ? (long long)v.value.enumerated.item[i] : v.value.integer.value[i];
     return 0;
@@ -119,7 +123,7 @@ static int ctl_write(managed_t *m, const long long *vals, int n) {
         else v.value.integer.value[i] = vals[i];
     }
     clock_gettime(CLOCK_MONOTONIC, &m->last_write);
-    if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_WRITE, &v) < 0) {
+    if (g_ctl < 0 || ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_WRITE, &v) < 0) {
         LOGE("write '%s' failed: %s", m->name, strerror(errno));
         return -1;
     }
@@ -163,6 +167,29 @@ static managed_t *manage_in(managed_t *list, int *count, const char *name, const
 
 static managed_t *manage(const char *name, const long long *want, int n, int write_only) {
     return manage_in(g_m, &g_nm, name, want, n, write_only);
+}
+
+// "SET call <control name>=<v1>[,<v2>...]": set during a call, restored after. How a non-Qualcomm platform (MediaTek,
+// Exynos) routes call audio is then data in its profile, not code.
+#define MAX_CALL_CONTROLS 16
+static struct { char name[NAME_LEN]; long long v[MAX_VALUES]; int n; } g_cc[MAX_CALL_CONTROLS];
+static int g_ncc = 0;
+static int call_control_add(const char *spec) {
+    const char *eq = strrchr(spec, '=');
+    if (!eq || eq == spec || g_ncc >= MAX_CALL_CONTROLS) return -1;
+    size_t len = (size_t)(eq - spec);
+    if (len >= NAME_LEN) return -1;
+    memcpy(g_cc[g_ncc].name, spec, len);
+    g_cc[g_ncc].name[len] = 0;
+    int n = 0;
+    for (const char *q = eq + 1; *q && n < MAX_VALUES; ) {
+        char *end;
+        g_cc[g_ncc].v[n++] = strtoll(q, &end, 0);
+        if (*end != ',') break;
+        q = end + 1;
+    }
+    g_cc[g_ncc++].n = n;
+    return 0;
 }
 
 // "SET silence <control name>=<value>": hold a control at a value for the daemon's lifetime.
@@ -213,9 +240,12 @@ static int call_start(int session) {
     applied += manage(inject, &on, 1, 0) != NULL;
     applied += manage(p.mute_tx, mute, 3, 1) != NULL;
     applied += manage(p.mute_rx, mute, 3, 1) != NULL;
+    for (int i = 0; i < g_ncc; i++) applied += manage(g_cc[i].name, g_cc[i].v, g_cc[i].n, 0) != NULL;
     g_call = 1;
     g_session = session;
-    audio_cfg_t ac = { .card = g_card, .capture_pcm = p.capture_pcm, .inject_pcm = p.inject_pcm,
+    g_remutes = 0;
+    audio_cfg_t ac = { .card = g_card, .capture_pcm = p.capture_pcm, .capture_rate = p.capture_rate,
+                       .capture_channels = p.capture_channels, .inject_pcm = p.inject_pcm,
                        .inject_rate = p.inject_rate, .inject_channels = p.inject_channels, .loopback = p.loopback };
     audio_call_begin(&ac);
     LOGI("CALL_START session=%d: %d controls applied", session, applied);
@@ -248,13 +278,31 @@ static void reapply_in(managed_t *list, int count, unsigned numid) {
     }
 }
 
+// The device mutes are write-only (no read-back, so a reset can't be detected), and the voice session may still be
+// starting when CALL_START applies them (audio begins at DIALING): a session start can wipe them, and the host's
+// earpiece then plays the caller (heard on r8q, 16 Oct 2026). So during a call they are re-asserted after every
+// burst of mixer changes by someone else (voice start, route and device switches all show up as control events).
+static int is_device_mute(unsigned numid) {
+    for (int i = 0; i < g_nm; i++) if (g_m[i].write_only && g_m[i].numid == numid) return 1;
+    return 0;
+}
+
+static void reassert_device_mutes(void) {
+    for (int i = 0; i < g_nm; i++) if (g_m[i].write_only) ctl_write(&g_m[i], g_m[i].want, g_m[i].nwant);
+    if (g_remutes++ < 20 || g_remutes % 100 == 0) LOGI("device mutes re-asserted after a route change (#%u)", g_remutes);
+}
+
 static void drain_ctl_events(void) {
     struct snd_ctl_event ev;
-    while (read(g_ctl, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
+    int route_changed = 0;
+    while (g_ctl >= 0 && read(g_ctl, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
         if (ev.type == SNDRV_CTL_EVENT_ELEM && (ev.data.elem.mask & SNDRV_CTL_EVENT_MASK_VALUE)
-            && ev.data.elem.mask != SNDRV_CTL_EVENT_MASK_REMOVE)
+            && ev.data.elem.mask != SNDRV_CTL_EVENT_MASK_REMOVE) {
             on_ctl_event(ev.data.elem.id.numid);
+            if (g_call && !is_device_mute(ev.data.elem.id.numid)) route_changed = 1;
+        }
     }
+    if (route_changed) reassert_device_mutes();
 }
 
 // ------------------------------------------------------------------ protocol
@@ -325,6 +373,7 @@ static int set_key(const char *key, const char *val) {
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (strcmp(key, names[i].k) == 0) {
+            if (strcmp(val, "-") == 0) { names[i].dst[0] = 0; return 0; }     // not used on this platform
             strncpy(names[i].dst, val, NAME_LEN - 1);
             names[i].dst[NAME_LEN - 1] = 0;
             return 0;
@@ -334,6 +383,10 @@ static int set_key(const char *key, const char *val) {
     if (strcmp(key, "mute.ramp") == 0) { p.ramp = strtoll(val, NULL, 0); return 0; }
     if (strcmp(key, "capture.pcm") == 0) { p.capture_pcm = atoi(val); return 0; }
     if (strcmp(key, "inject.pcm") == 0) { p.inject_pcm = atoi(val); return 0; }
+    if (strcmp(key, "capture.rate") == 0) { p.capture_rate = atoi(val); return 0; }
+    if (strcmp(key, "capture.channels") == 0) { p.capture_channels = atoi(val); return 0; }
+    if (strcmp(key, "call") == 0) return call_control_add(val);
+    if (strcmp(key, "call.clear") == 0) { g_ncc = 0; return 0; }
     if (strcmp(key, "inject.rate") == 0) { p.inject_rate = atoi(val); return 0; }
     if (strcmp(key, "inject.channels") == 0) { p.inject_channels = atoi(val); return 0; }
     if (strcmp(key, "loopback") == 0) { p.loopback = atoi(val); return 0; }
@@ -384,11 +437,27 @@ static void handle_line(int fd, char *line) {
         char t[160];
         audio_totals(t, sizeof(t));
         reply(fd, "OK call=%d session=%d silence=%d %s", g_call, g_session, g_np, t);
+    } else if (strcmp(cmd, "STALL") == 0) {             // STALL <ms>: debug, one inject-loop stall
+        char *v = strtok(NULL, " ");
+        audio_stall(v ? atoi(v) : 0);
+        reply(fd, "OK");
+    } else if (strcmp(cmd, "TUNE") == 0) {              // TUNE [prime keep period]: audio latency trade-offs
+        char *a = strtok(NULL, " "), *b = strtok(NULL, " "), *c = strtok(NULL, " ");
+        char t[80];
+        if (a && b && c && audio_tune(atoi(a), atoi(b), atoi(c)) < 0) { reply(fd, "ERR bad values"); return; }
+        audio_tune_get(t, sizeof(t));
+        reply(fd, "OK %s", t);
+    } else if (strcmp(cmd, "POWERKEY") == 0) {          // POWERKEY 1|0: box mode blocks the power button
+        char *v = strtok(NULL, " ");
+        reply(fd, "OK %d", box_power_block(v && atoi(v) == 1));
     } else if (strcmp(cmd, "SCREEN_OFF") == 0 || strcmp(cmd, "WAKE") == 0) {
         reply(fd, box_screen(strcmp(cmd, "WAKE") == 0) == 0 ? "OK" : "ERR spawn failed");
     } else if (strcmp(cmd, "ROLE") == 0) {
         char *role = strtok(NULL, " "), *pkg = strtok(NULL, " ");
         reply(fd, box_role(role, pkg) == 0 ? "OK" : "ERR bad role or package");
+    } else if (strcmp(cmd, "NETBLOCK") == 0) {          // NETBLOCK <uid> <0|1>
+        char *u = strtok(NULL, " "), *on = strtok(NULL, " ");
+        reply(fd, u && on && box_netblock(atoi(u), atoi(on)) == 0 ? "OK" : "ERR bad uid");
     } else if (strcmp(cmd, "CHARGE?") == 0) {
         const char *node = box_charge_node();
         if (node) reply(fd, "OK %s", node); else reply(fd, "ERR unsupported");
@@ -444,19 +513,27 @@ static int run_client(const char *script) {
 static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
 int main(int argc, char **argv) {
+    int card_given = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--client") == 0 && i + 1 < argc) return run_client(argv[i + 1]);
         if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) g_allowed_uid = (uid_t)atoi(argv[++i]);
-        else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) g_card = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) { g_card = atoi(argv[++i]); card_given = 1; }
         else if (strcmp(argv[i], "--loopback") == 0) p.loopback = 1;
     }
 
+    // The mixer: the given card, else the first one that opens. Without any, keep running (box mode, charge limit,
+    // network block need the daemon too); call audio is simply unavailable.
     char path[64];
-    snprintf(path, sizeof(path), "/dev/snd/controlC%d", g_card);
-    g_ctl = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-    if (g_ctl < 0) { LOGE("open %s: %s", path, strerror(errno)); return 1; }
-    int on = 1;
-    if (ioctl(g_ctl, SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS, &on) < 0) LOGW("event subscribe failed: %s", strerror(errno));
+    for (int c = card_given ? g_card : 0; c < (card_given ? g_card + 1 : 8) && g_ctl < 0; c++) {
+        snprintf(path, sizeof(path), "/dev/snd/controlC%d", c);
+        g_ctl = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+        if (g_ctl >= 0) g_card = c;
+    }
+    if (g_ctl < 0) LOGE("no sound card mixer (%s): running without call audio", strerror(errno));
+    else {
+        int on = 1;
+        if (ioctl(g_ctl, SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS, &on) < 0) LOGW("event subscribe failed: %s", strerror(errno));
+    }
 
     struct sockaddr_un a;
     socklen_t alen = abstract_addr(&a);
@@ -478,6 +555,7 @@ int main(int argc, char **argv) {
     box_charge_init();
     int uev = box_uevent_open();
     box_announce();            // the app reconnects at once (silence controls back within a second)
+    box_log_capture();
     LOGI("simrelayd %s up: card %d, socket @%s, allowed uid %d", VERSION, g_card, SOCK_NAME, (int)g_allowed_uid);
 
     int client = -1;

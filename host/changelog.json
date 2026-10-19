@@ -1,0 +1,80 @@
+[
+  {
+    "version": "0.11.0",
+    "code": 32,
+    "en": "MediaTek phones: call audio works both ways (tested on the Redmi Note 8 Pro).\nBox mode: the power button no longer lights the screen.\nThe host keeps its place as the default SMS app, so no SMS goes missing.\nSMS the network never confirms show as \"not confirmed\" instead of failed.\nAndroid 11: VoLTE shown correctly.",
+    "tr": "MediaTek telefonlar: arama sesi iki yönde de çalışıyor (Redmi Note 8 Pro'da denendi).\nKutu modu: güç tuşu artık ekranı yakmıyor.\nAna cihaz varsayılan SMS uygulaması olarak kalıyor, böylece hiçbir SMS kaybolmuyor.\nŞebekenin onaylamadığı SMS'ler başarısız yerine \"onaylanmadı\" olarak görünüyor.\nAndroid 11: VoLTE doğru gösteriliyor."
+  },
+  {
+    "version": "0.10.3",
+    "code": 31,
+    "en": "Host Wi-Fi: when you're away, the host now reliably joins your saved network with its screen off (Samsung could leave it unjoined).",
+    "tr": "Ana cihazın Wi-Fi'ı: siz uzaktayken ana cihaz, ekranı kapalıyken de kayıtlı ağınıza güvenilir şekilde katılıyor (Samsung'da katılmadan kalabiliyordu)."
+  },
+  {
+    "version": "0.10.2",
+    "code": 30,
+    "en": "When you leave the host, an unused hotspot turns off by itself (so the host can use its Wi-Fi while you're away).\nNo hotspot start during an internet call.\nTosbiSim shows what the host's internet runs on: Wi-Fi or mobile data.",
+    "tr": "Ana cihazdan ayrıldığınızda kullanılmayan erişim noktası kendiliğinden kapanır (böylece siz uzaktayken ana cihaz Wi-Fi'ını kullanabilir).\nİnternet üzerinden arama sırasında erişim noktası açılmaz.\nTosbiSim, ana cihazın internetinin neyle çalıştığını gösterir: Wi-Fi veya mobil veri."
+  },
+  {
+    "version": "0.10.1",
+    "code": 29,
+    "en": "Host Wi-Fi: the list of networks the host can see now works on Samsung phones.",
+    "tr": "Ana cihazın Wi-Fi'ı: ana cihazın gördüğü ağların listesi artık Samsung telefonlarda da çalışıyor."
+  },
+  {
+    "version": "0.10.0",
+    "code": 28,
+    "en": "First MediaTek phone (Redmi Note 8 Pro), Android 11 and MIUI support.\nFixed: on Android 11 the phone restarted itself about 25 s after every boot.\nHost Wi-Fi: off while your iPhone is nearby or the hotspot is on; optionally on while you're away.\nHotspot: WPA2 only (WPA3 failed to start on some phones).\nThe setup screen no longer crashes on a fresh install.",
+    "tr": "İlk MediaTek telefon (Redmi Note 8 Pro), Android 11 ve MIUI desteği.\nDüzeltildi: Android 11'de telefon her açılıştan yaklaşık 25 sn sonra kendini yeniden başlatıyordu.\nAna cihazın Wi-Fi'ı: iPhone'unuz yakındayken veya erişim noktası açıkken kapalı; isterseniz siz uzaktayken açık.\nErişim noktası: yalnızca WPA2 (WPA3 bazı telefonlarda açılmıyordu).\nKurulum ekranı yeni kurulumda artık çökmüyor."
+  },
+  {
+    "version": "0.9.9",
+    "code": 27,
+    "en": "Until a host passes its call test, TosbiSim stays out of calls: they ring on the host as usual and appear on your iPhone as missed calls.",
+    "tr": "Ana cihaz arama testini geçene kadar TosbiSim aramalara karışmaz: aramalar ana cihazda her zamanki gibi çalar ve iPhone'unuzda cevapsız arama olarak görünür."
+  },
+  {
+    "version": "0.9.8",
+    "code": 26,
+    "en": "Reliability: remote-mode call audio can no longer get stuck after a call, a lost network check keeps a downloaded update, and the host stays quiet in calls without relayed audio.\nGroundwork for more phones: audio settings come from each phone family's profile.",
+    "tr": "Güvenilirlik: uzaktan mod arama sesi artık bir aramadan sonra takılı kalmıyor, başarısız bir ağ denetimi indirilmiş güncellemeyi kaybetmiyor ve ses aktarılmayan aramalarda ana cihaz sessiz kalıyor.\nDaha fazla telefon için altyapı: ses ayarları her telefon ailesinin profilinden geliyor."
+  },
+  {
+    "version": "0.9.7",
+    "code": 25,
+    "en": "After the host app restarts (for example after an update), your iPhone reconnects within seconds.",
+    "tr": "Ana cihaz uygulaması yeniden başladıktan sonra (örneğin bir güncellemeden sonra) iPhone'unuz saniyeler içinde yeniden bağlanıyor."
+  },
+  {
+    "version": "0.9.6",
+    "code": 24,
+    "en": "Updating shows each step on your iPhone: installing, restarting, and done.",
+    "tr": "Güncelleme her adımı iPhone'unuzda gösteriyor: yükleniyor, yeniden başlıyor ve tamamlandı."
+  },
+  {
+    "version": "0.9.5",
+    "code": 23,
+    "en": "The host reports changes faster: the hotspot shows \"Starting…\" at once, and the app and widgets update sooner.",
+    "tr": "Ana cihaz değişiklikleri daha hızlı bildiriyor: erişim noktası hemen \"Açılıyor…\" gösteriyor, uygulama ve widget'lar daha çabuk güncelleniyor."
+  },
+  {
+    "version": "0.9.4",
+    "code": 22,
+    "en": "Fixes messages from the host arriving broken when they were long (update notes, long texts).\nUpdates install at night only an hour or more after your iPhone was told, so you can still choose Later.",
+    "tr": "Ana cihazdan gelen uzun mesajların (güncelleme notları, uzun SMS'ler) bozuk ulaşması düzeltildi.\nGüncellemeler gece, iPhone'unuza haber verildikten en az bir saat sonra yüklenir; böylece hâlâ \"Sonra\"yı seçebilirsiniz."
+  },
+  {
+    "version": "0.9.3",
+    "code": 21,
+    "en": "Automatic hotspot recognises your iPhone on the host's hotspot more reliably, so turning the hotspot off yourself stays off.",
+    "tr": "Otomatik erişim noktası, iPhone'unuzun ana cihazın erişim noktasına bağlı olduğunu daha güvenilir anlıyor; erişim noktasını kendiniz kapattığınızda kapalı kalıyor."
+  },
+  {
+    "version": "0.9.2",
+    "code": 20,
+    "en": "Fixes robotic or choppy sound for the other caller on some calls; the host now repairs its audio output by itself if it ever stalls.\nMobile data switch: the hotspot turns it on, you can turn it off.\nThe hotspot shows \"Starting…\" while it comes up.\nUpdates: the host updates itself after asking your iPhone.",
+    "tr": "Bazı aramalarda karşı tarafın sesinizi robotik ya da kesik duyması düzeltildi; ana cihaz ses çıkışı takılırsa artık kendini onarıyor.\nMobil veri anahtarı: erişim noktası açar, siz kapatabilirsiniz.\nErişim noktası açılırken \"Açılıyor…\" gösterir.\nGüncellemeler: ana cihaz iPhone'unuza sorduktan sonra kendini günceller."
+  }
+]

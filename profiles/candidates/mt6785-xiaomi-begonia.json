@@ -1,0 +1,56 @@
+{
+  "id": "mtk/mt6785-xiaomi-begonia",
+  "match": {
+    "devices": [
+      "begonia",
+      "begoniain"
+    ],
+    "platforms": [
+      "mt6785"
+    ],
+    "manufacturers": [
+      "xiaomi",
+      "redmi"
+    ]
+  },
+  "router": "mtk-afe",
+  "card": 0,
+  "capture": {
+    "pcm": 17,
+    "rate": 16000,
+    "channels": 1,
+    "route": "-",
+    "rec_config": "-"
+  },
+  "inject": {
+    "pcm": 2,
+    "rate": 48000,
+    "channels": 2,
+    "route_by_session": {}
+  },
+  "session_by_slot": {
+    "0": 1,
+    "1": 1
+  },
+  "call_controls": {
+    "UL_MONO_1_CH1 PCM_2_CAP_CH1": 1,
+    "PCM_2_PB_CH1 DL2_CH1": 1,
+    "PCM_2_PB_CH2 DL2_CH2": 1,
+    "PCM_2_PB_CH1 ADDA_UL_CH1": 0,
+    "PCM_2_PB_CH2 ADDA_UL_CH2": 0,
+    "ADDA_DL_CH1 PCM_2_CAP_CH1": 0,
+    "ADDA_DL_CH2 PCM_2_CAP_CH1": 0,
+    "ADDA_DL_CH3 PCM_2_CAP_CH1": 0,
+    "ADDA_DL_CH4 PCM_2_CAP_CH1": 0,
+    "ADDA_DL_CH1 DL2_CH1": 0,
+    "ADDA_DL_CH2 DL2_CH1": 0,
+    "ADDA_DL_CH2 DL2_CH2": 0,
+    "ADDA_DL_CH3 DL2_CH1": 0,
+    "ADDA_DL_CH4 DL2_CH1": 0,
+    "ADDA_DL_CH4 DL2_CH2": 0,
+    "ADDA_DL_CH2 PCM_2_CAP_CH2": 0,
+    "ADDA_DL_CH4 PCM_2_CAP_CH2": 0
+  },
+  "evidence": "device-dumps/rn8pro-begonia: tinymix.idle.txt (454 controls, alsactl_list), audio_device.xml paths MD1_TO_ADDA_DL, PLAYBACK2_TO_MD1, MD1_TO_CAPTURE_MONO_1; /proc/asound/pcm 00-02 Playback_2, 00-17 Capture_Mono_1 (idle.txt). Not yet measured on a live call. During a call Playback_2 (DL2) only accepts 48 kHz (HW_REFINE rate 48000..48000; 8/16/32 kHz -> 'cannot set hw params: Invalid argument', tools/native/pcm_probe.c, 19 Oct); Capture_Mono_1 runs 16 kHz mono, period 160. Live calls Redmi<->S20 FE with the Mac test client (tools/macclient), 19 Oct: Mac 1 kHz tone -> Redmi played 2000 frames -> S20 FE captured 995 voiced frames, peak 28835; Redmi captured the downlink (ringback/far end, 100 frames/s to the client). Mixer during the call: capture + inject links on, host mic and every ADDA_DL (DAC) link off, Ext_Speaker_Amp off.",
+  "notes": "MediaTek AFE: modem MD1 <-> PCM_2. Caller audio: modem downlink PCM_2_CAP -> UL_MONO_1 -> Capture_Mono_1 (vendor path MD1_TO_CAPTURE_MONO_1). Our audio: Playback_2 (DL2) -> PCM_2_PB, the vendor path PLAYBACK2_TO_MD1; the host mic (ADDA_UL) unlinked from PCM_2_PB. Host silence: the downlink unlinked from the DAC (ADDA_DL_CH1-4 PCM_2_CAP_CH1 = 0; the HAL sets them in MD1_TO_ADDA_DL, the daemon re-asserts on every control event); RCV Mux has a Mute option too. Speech_*_Mute only store values for the vendor library: not used. Rates measured on a live call: inject 48 kHz (DL2 is pinned to it while the modem path runs), capture 16 kHz mono. Both SIMs on MD1 (Speech_Phone1/2_MD_Idx = 0)."
+}

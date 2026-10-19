@@ -63,6 +63,7 @@
     <string name="tier_verified">Doğrulandı: TosbiSim ekibi bu telefonda arama sesini ölçtü.</string>
     <string name="tier_expected">Çalışması bekleniyor: doğrulanmış bir telefonla aynı platform. Arama sesi kısa bir arama testinden sonra açılır.</string>
     <string name="tier_experimental">Deneysel: araştırıldı ama henüz ölçülmedi. Mesajlar, arama yönetimi ve erişim noktası çalışmalı; arama sesi için arama testi gerekir.</string>
+    <string name="tier_not_yet">Henüz değil: TosbiSim bu telefonun ses sisteminde arama sesini henüz aktaramıyor. Mesajlar, arama yönetimi ve erişim noktası çalışır (Temel mod).</string>
     <string name="tier_unknown">Henüz test edilmedi. Mesajlar, arama yönetimi ve erişim noktası çalışmalı (Temel mod); arama sesi bu telefon ölçülene kadar kullanılamaz.</string>
     <string name="tier_unsupported">Desteklenmiyor.</string>
     <string name="step_boot">Önyükleyici (bootloader)</string>
@@ -84,4 +85,10 @@
     <string name="btn_restart">Telefonu yeniden başlat</string>
     <string name="install_ok">Kuruldu. Tamamlamak için telefonu yeniden başlatın.</string>
     <string name="install_fail">Kurulum başarısız: %s</string>
+    <!-- compatibility report -->
+    <string name="btn_send_report">Uyumluluk raporu gönder</string>
+    <string name="btn_sending">Gönderiliyor…</string>
+    <string name="report_note">Anonim: telefon modeli, yonga, Android sürümü, önyükleyici durumu ve ses yapılandırması. Numara, kimlik veya kişisel veri yok.</string>
+    <string name="report_sent">Rapor gönderildi. Teşekkürler!</string>
+    <string name="report_failed">Rapor gönderilemedi (%s). İnternet bağlantısını kontrol edin.</string>
 </resources>

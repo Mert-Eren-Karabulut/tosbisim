@@ -64,6 +64,7 @@
     <string name="tier_verified">Verified: the TosbiSim team measured call audio on this phone.</string>
     <string name="tier_expected">Expected to work: same platform as a verified phone. Call audio switches on after a short call test.</string>
     <string name="tier_experimental">Experimental: researched but not measured yet. Texts, call control and hotspot should work; call audio needs the call test.</string>
+    <string name="tier_not_yet">Not yet: TosbiSim can\'t relay call audio on this phone\'s audio system yet. Texts, call control and hotspot work (Basic mode).</string>
     <string name="tier_unknown">Not tested yet. Texts, call control and hotspot should work (Basic mode); call audio isn\'t available until this phone is measured.</string>
     <string name="tier_unsupported">Not supported.</string>
     <string name="step_boot">Bootloader</string>
@@ -85,4 +86,10 @@
     <string name="btn_restart">Restart the phone</string>
     <string name="install_ok">Installed. Restart the phone to finish.</string>
     <string name="install_fail">Install failed: %s</string>
+    <!-- compatibility report -->
+    <string name="btn_send_report">Send compatibility report</string>
+    <string name="btn_sending">Sending…</string>
+    <string name="report_note">Anonymous: phone model, chip, Android version, bootloader state and audio setup. No numbers, IDs or personal data.</string>
+    <string name="report_sent">Report sent. Thank you!</string>
+    <string name="report_failed">Couldn\'t send the report (%s). Check the internet connection.</string>
 </resources>

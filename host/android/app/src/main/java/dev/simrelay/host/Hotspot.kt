@@ -34,6 +34,7 @@ object Hotspot {
     /** Follow tethering state and connected clients (TetheringEventCallback); [changed] on every change. */
     fun watch(ctx: Context, changed: () -> Unit) {
         onChange = changed
+        dropWpa3(ctx)
         runCatching {
             val tm = ctx.getSystemService("tethering") ?: return
             val cbClass = Class.forName("android.net.TetheringManager\$TetheringEventCallback")
@@ -58,6 +59,7 @@ object Hotspot {
                         Log.i(TAG, "tethered interfaces: $ifaces")
                         val wifi = ifaces.any { it.startsWith("wlan") || it.startsWith("swlan") || it.startsWith("ap") }
                         DataUsage.tetheringChanged(ifaces.filter { it.startsWith("swlan") || it.startsWith("wlan") || it.startsWith("ap") })
+                        tethered = ifaces
                         if (wifi != tetheredWifi) { tetheredWifi = wifi; Log.i(TAG, "hotspot tethered=$wifi $ifaces"); changed() }
                     }
                 }
@@ -98,42 +100,72 @@ object Hotspot {
         return HotspotMsg.Client.newBuilder().setMac(mac).setName(name.orEmpty()).build()
     }
 
+    /** The soft AP settings we show and change. */
+    private data class ApCfg(val ssid: String, val passphrase: String, val security: Int, val band: Int, val bands: IntArray?,
+                             val hidden: Boolean, val maxClients: Int, val autoOff: Boolean, val timeoutMs: Long)
+
+    @Volatile private var rootCfg: Pair<ApCfg, Long>? = null
+
+    /**
+     * The hotspot's settings: from WifiManager where we may (Android 12+), else (Android 11: NETWORK_SETTINGS only) from
+     * the root helper, cached for a minute because status is read often.
+     */
+    private fun apConfig(ctx: Context): ApCfg? {
+        val wm = ctx.getSystemService(WifiManager::class.java)
+        val direct = runCatching { WifiManager::class.java.getMethod("getSoftApConfiguration").invoke(wm)!! }
+        direct.getOrNull()?.let { cfg ->
+            fun <T> get(name: String): T? = runCatching { @Suppress("UNCHECKED_CAST") (cfg.javaClass.getMethod(name).invoke(cfg) as T) }.getOrNull()
+            return ApCfg(get<String>("getSsid").orEmpty(), get<String>("getPassphrase").orEmpty(), get<Int>("getSecurityType") ?: SEC_WPA2,
+                get<Int>("getBand") ?: BAND_2GHZ, get<IntArray>("getBands"), get<Boolean>("isHiddenSsid") ?: false,
+                get<Int>("getMaxNumberOfClients") ?: 0, get<Boolean>("isAutoShutdownEnabled") ?: false, get<Long>("getShutdownTimeoutMillis") ?: 0L)
+        }
+        if (cause(direct.exceptionOrNull() ?: return null) !is SecurityException) return null
+        rootCfg?.let { (c, at) -> if (android.os.SystemClock.elapsedRealtime() - at < 60_000) return c }
+        val m = RootWifi.run(ctx, "get") ?: return rootCfg?.first
+        fun s(k: String) = String(android.util.Base64.decode(m[k].orEmpty(), android.util.Base64.NO_WRAP))
+        val c = ApCfg(s("ssid"), s("passphrase"), m["security"]?.toIntOrNull() ?: SEC_WPA2, m["band"]?.toIntOrNull() ?: BAND_2GHZ,
+            m["bands"]?.split(",")?.mapNotNull { it.toIntOrNull() }?.toIntArray(), m["hidden"] == "1", m["max"]?.toIntOrNull() ?: 0,
+            m["autoOff"] == "1", m["timeout"]?.toLongOrNull() ?: 0L)
+        rootCfg = c to android.os.SystemClock.elapsedRealtime()
+        return c
+    }
+
     fun info(ctx: Context): HotspotMsg = runCatching {
         val wm = ctx.getSystemService(WifiManager::class.java)
         val on = WifiManager::class.java.getMethod("isWifiApEnabled").invoke(wm) as Boolean
-        val cfg = WifiManager::class.java.getMethod("getSoftApConfiguration").invoke(wm)!!
-        fun <T> get(name: String): T? = runCatching { @Suppress("UNCHECKED_CAST") (cfg.javaClass.getMethod(name).invoke(cfg) as T) }.getOrNull()
-        val bands = get<IntArray>("getBands")
+        val cfg = apConfig(ctx) ?: error("no access to the hotspot settings")
         val band = when {
-            bands != null && bands.size >= 2 -> HotspotMsg.Band.BAND_DUAL_2_5
-            else -> when (get<Int>("getBand") ?: BAND_2GHZ) {
+            cfg.bands != null && cfg.bands.size >= 2 -> HotspotMsg.Band.BAND_DUAL_2_5
+            else -> when (cfg.band) {
                 BAND_2GHZ -> HotspotMsg.Band.BAND_2GHZ
                 BAND_5GHZ -> HotspotMsg.Band.BAND_5GHZ
                 BAND_6GHZ -> HotspotMsg.Band.BAND_6GHZ
                 else -> HotspotMsg.Band.BAND_AUTO
             }
         }
-        val security = when (get<Int>("getSecurityType")) {
+        val security = when (cfg.security) {
             SEC_OPEN -> HotspotMsg.Security.OPEN
             SEC_WPA3_TRANSITION -> HotspotMsg.Security.WPA3_TRANSITION
             SEC_WPA3 -> HotspotMsg.Security.WPA3
             else -> HotspotMsg.Security.WPA2
         }
+        val starting = !on && startingSince > 0 && android.os.SystemClock.elapsedRealtime() - startingSince < 15_000
         HotspotMsg.newBuilder()
-            .setSupported(true).setOn(on)
-            .setSsid(get<String>("getSsid").orEmpty())
-            .setPassphrase(get<String>("getPassphrase").orEmpty())
+            .setSupported(true).setOn(on).setStarting(starting).setGateway(if (on) gateway() else "")
+            .setSsid(cfg.ssid).setPassphrase(cfg.passphrase)
             .setBand(band).setSecurity(security)
-            .setHidden(get<Boolean>("isHiddenSsid") ?: false)
-            .setMaxClients(get<Int>("getMaxNumberOfClients") ?: 0)
-            .setAutoOff(get<Boolean>("isAutoShutdownEnabled") ?: false)
-            .setAutoOffMinutes(((get<Long>("getShutdownTimeoutMillis") ?: 0L) / 60_000L).toInt())
+            .setHidden(cfg.hidden).setMaxClients(cfg.maxClients)
+            .setAutoOff(cfg.autoOff).setAutoOffMinutes((cfg.timeoutMs / 60_000L).toInt())
             .addAllClients(if (on) clients else emptyList())
-            .setCapabilities(capabilities(wm))
+            .setCapabilities(runCatching { capabilities(wm) }.getOrDefault(HotspotMsg.Capabilities.getDefaultInstance()))
             .setUsage(DataUsage.usage())
             .build()
     }.getOrElse { Log.w(TAG, "hotspot info unavailable: ${cause(it)}"); HotspotMsg.newBuilder().setSupported(false).build() }
 
+    /**
+     * Offered settings. WPA2 only (18 Oct): WPA3 hotspots depend on the phone (the Redmi Note 8 Pro's station
+     * has WPA3, its hotspot refuses SAE and silently never starts) and nobody needs them for a phone-to-phone link.
+     */
     private fun capabilities(wm: WifiManager): HotspotMsg.Capabilities {
         val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(true).setAutoOff(true)
         b.addBands(HotspotMsg.Band.BAND_2GHZ)
@@ -141,8 +173,17 @@ object Hotspot {
         if (wm.is6GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_6GHZ)
         if (wm.is5GHzBandSupported && android.os.Build.VERSION.SDK_INT >= 31 && wm.isBridgedApConcurrencySupported) b.addBands(HotspotMsg.Band.BAND_DUAL_2_5)
         b.addSecurities(HotspotMsg.Security.WPA2)
-        if (wm.isWpa3SaeSupported) b.addSecurities(HotspotMsg.Security.WPA3_TRANSITION).addSecurities(HotspotMsg.Security.WPA3)
         return b.build()
+    }
+
+    /** A hotspot left on WPA3 (by the OEM or an older host version) goes back to WPA2, same name and password. */
+    private fun dropWpa3(ctx: Context) = exec.execute {
+        val h = info(ctx)
+        if (!h.supported || h.on || (h.security != HotspotMsg.Security.WPA3 && h.security != HotspotMsg.Security.WPA3_TRANSITION)) return@execute
+        configure(ctx, h.toBuilder().setSecurity(HotspotMsg.Security.WPA2).build()) { ok, d ->
+            Log.i(TAG, "hotspot security ${h.security} -> WPA2: ${if (ok) "done" else d}")
+            onChange?.invoke()
+        }
     }
 
     /** Apply the client's settings (ssid, passphrase, band, hidden, security, max clients, auto-off). */
@@ -151,15 +192,28 @@ object Hotspot {
             if (c.ssid.isBlank() || c.ssid.toByteArray().size > 32) error("network name must be 1-32 bytes")
             val sec = when (c.security) {
                 HotspotMsg.Security.OPEN -> SEC_OPEN
-                HotspotMsg.Security.WPA3_TRANSITION -> SEC_WPA3_TRANSITION
-                HotspotMsg.Security.WPA3 -> SEC_WPA3
+                HotspotMsg.Security.WPA3_TRANSITION, HotspotMsg.Security.WPA3 -> error("WPA3 isn't supported: use WPA2")
                 else -> SEC_WPA2
             }
             if (sec != SEC_OPEN && c.passphrase.length !in 8..63) error("password must be 8-63 characters")
             val wm = ctx.getSystemService(WifiManager::class.java)
             val wasOn = WifiManager::class.java.getMethod("isWifiApEnabled").invoke(wm) as Boolean
             val cfgClass = Class.forName("android.net.wifi.SoftApConfiguration")
-            val current = WifiManager::class.java.getMethod("getSoftApConfiguration").invoke(wm)
+            val current = runCatching { WifiManager::class.java.getMethod("getSoftApConfiguration").invoke(wm) }.getOrNull()
+            if (current == null) {                       // Android 11: only as root (RootWifi)
+                val bands = when (c.band) {
+                    HotspotMsg.Band.BAND_DUAL_2_5 -> "$BAND_2GHZ,$BAND_5GHZ"; HotspotMsg.Band.BAND_5GHZ -> "$BAND_5GHZ"
+                    HotspotMsg.Band.BAND_6GHZ -> "$BAND_6GHZ"; HotspotMsg.Band.BAND_AUTO -> "${BAND_2GHZ or BAND_5GHZ}"; else -> "$BAND_2GHZ"
+                }
+                fun b64(x: String) = android.util.Base64.encodeToString(x.toByteArray(), android.util.Base64.NO_WRAP)
+                RootWifi.run(ctx, "set", b64(c.ssid), b64(c.passphrase), "$sec", bands, if (c.hidden) "1" else "0", "${c.maxClients}",
+                    if (c.autoOff) "1" else "0", "${if (c.autoOff && c.autoOffMinutes > 0) c.autoOffMinutes * 60_000L else 0L}")
+                    ?: error("the phone rejected these settings")
+                rootCfg = null
+                Log.i(TAG, "hotspot config saved as root (Android 11) band=${c.band} sec=${c.security} (was on: $wasOn)")
+                if (wasOn) set(ctx, false) { _, _ -> exec.execute { Thread.sleep(1500); set(ctx, true, done) } } else done(true, "saved")
+                return
+            }
             val bClass = Class.forName("android.net.wifi.SoftApConfiguration\$Builder")
             val b = bClass.getConstructor(cfgClass).newInstance(current)
             fun call(name: String, types: Array<Class<*>>, vararg args: Any?) = bClass.getMethod(name, *types).invoke(b, *args)
@@ -187,17 +241,48 @@ object Hotspot {
         }.onFailure { done(false, cause(it).message ?: cause(it).toString()) }
     }
 
+    @Volatile private var tethered: List<String> = emptyList()
+
+    /** The soft AP's own IPv4 (e.g. 192.168.x.1): on the interfaces Android reports as tethered, else by usual names. */
+    private fun gateway(): String = runCatching {
+        java.net.NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback && (it.name in tethered || it.name.startsWith("swlan") || it.name.startsWith("ap") ||
+                it.name.startsWith("softap") || (it.name.startsWith("wlan") && it.name != "wlan0")) }
+            .sortedByDescending { it.name in tethered }
+            .flatMap { it.inetAddresses.toList() }
+            .firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }?.hostAddress
+    }.getOrNull().orEmpty()
+
     /** Start/stop Wi-Fi tethering; [done] gets (ok, detail) once the system answers. */
+    /** A start is in flight since (elapsedRealtime); 0 = none. */
+    @Volatile private var startingSince = 0L
+
+    /**
+     * Idempotent: the iPhone may ask several times at once (widget taps + automatic hotspot), and a second
+     * startTethering while one is in flight fails with TETHER_ERROR_INTERNAL_ERROR (5) although the hotspot
+     * comes up (seen 16 Oct 2026). So "on" while on or starting is OK, and a failure while the hotspot is
+     * actually up counts as success.
+     */
     fun set(ctx: Context, on: Boolean, done: (Boolean, String) -> Unit) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val isOn = runCatching { info(ctx).on }.getOrDefault(false)
+        if (on && (isOn || now - startingSince < 15_000)) {
+            Log.i(TAG, "hotspot start: already ${if (isOn) "on" else "starting"}, nothing to do")
+            done(true, if (isOn) "already on" else "starting"); return
+        }
+        if (!on && !isOn && now - startingSince >= 15_000) { done(true, "already off"); return }
+        // (a stop while starting goes through: stopTethering cancels the pending start)
         runCatching {
             val tm = ctx.getSystemService("tethering") ?: error("no tethering service")
             val tmClass = tm.javaClass
             if (!on) {
+                startingSince = 0
                 tmClass.getMethod("stopTethering", Int::class.javaPrimitiveType).invoke(tm, TETHERING_WIFI)
                 Log.i(TAG, "hotspot stop requested")
                 done(true, "stopped")
                 return
             }
+            MobileData.ensureOn(ctx)                    // the hotspot shares mobile data: it must be on
             val builderClass = Class.forName("android.net.TetheringManager\$TetheringRequest\$Builder")
             val builder = builderClass.getConstructor(Int::class.javaPrimitiveType).newInstance(TETHERING_WIFI)
             builderClass.getMethod("setShouldShowEntitlementUi", Boolean::class.javaPrimitiveType).invoke(builder, false)
@@ -205,15 +290,24 @@ object Hotspot {
             val cbClass = Class.forName("android.net.TetheringManager\$StartTetheringCallback")
             val cb = Proxy.newProxyInstance(cbClass.classLoader, arrayOf(cbClass)) { _, m, args ->
                 when (m.name) {
+                    // Fires when the request is accepted, ~2 s before the AP is up: keep the in-flight window open
+                    // (isWifiApEnabled covers it once up), or a second request in the gap fails with error 5.
                     "onTetheringStarted" -> { Log.i(TAG, "hotspot started"); done(true, "started") }
-                    "onTetheringFailed" -> { Log.w(TAG, "hotspot failed: error ${args?.get(0)}"); done(false, "error ${args?.get(0)}") }
+                    "onTetheringFailed" -> {
+                        startingSince = 0
+                        val upAnyway = runCatching { info(ctx).on }.getOrDefault(false)
+                        Log.w(TAG, "hotspot start failed: error ${args?.get(0)}${if (upAnyway) " (but it is on: OK)" else ""}")
+                        done(upAnyway, if (upAnyway) "started" else "error ${args?.get(0)}")
+                    }
                 }
                 null
             }
+            startingSince = now
             tmClass.getMethod("startTethering", request.javaClass, java.util.concurrent.Executor::class.java, cbClass)
                 .invoke(tm, request, exec, cb)
             Log.i(TAG, "hotspot start requested")
         }.onFailure {
+            if (on) startingSince = 0
             Log.e(TAG, "hotspot ${if (on) "start" else "stop"} failed: ${cause(it)}")
             done(false, cause(it).toString())
         }

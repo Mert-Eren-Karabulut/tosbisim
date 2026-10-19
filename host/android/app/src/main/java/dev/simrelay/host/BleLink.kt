@@ -111,7 +111,9 @@ class BleLink(
 
     fun send(device: BluetoothDevice, payload: ByteArray) {
         val bytes = Framing.frame(payload)
-        val chunk = (mtu[device.address] ?: 23) - 3
+        // ATT caps an attribute value at 512 bytes: a 514-byte chunk (MTU 517) reached iOS 2 bytes short and broke
+        // every message longer than one chunk ("corrupt stream", 18 Oct: the status with update notes).
+        val chunk = minOf((mtu[device.address] ?: 23) - 3, 512)
         val q = queues.getOrPut(device.address) { ArrayDeque() }
         synchronized(q) { for (i in bytes.indices step chunk) q.addLast(bytes.copyOfRange(i, minOf(i + chunk, bytes.size))) }
         pump(device)
@@ -197,6 +199,7 @@ class BleLink(
 
     private fun resetStream(address: String) {
         readers.remove(address)
+        if (bt.getConnectedDevices(BluetoothProfile.GATT).none { it.address == address }) mtu.remove(address)
         queues[address]?.let { synchronized(it) { it.clear() } }
         inFlight.remove(address)
     }

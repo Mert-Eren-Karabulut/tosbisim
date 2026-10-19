@@ -68,6 +68,8 @@ object Daemon {
     fun reconnect() = exec.execute { if (started) { close(); request("STATUS") } }
 
     fun screenOff() = exec.execute { request("SCREEN_OFF") }
+    fun powerKey(block: Boolean) = exec.execute { request("POWERKEY ${if (block) 1 else 0}") }
+    fun netblock(uid: Int, on: Boolean) = exec.execute { request("NETBLOCK $uid ${if (on) 1 else 0}") }
     fun wake() = exec.execute { request("WAKE") }
     fun role(role: String, pkg: String) = exec.execute { request("ROLE $role $pkg") }
 
@@ -98,6 +100,7 @@ object Daemon {
                 Log.i(TAG, "profile: ${profile?.let { "${it.id} (auto)" } ?: "none, Basic mode"}")
             }
             profile?.daemonSetLines()?.forEach { send(it) }
+            if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key
             if (chargeLimit > 0) send("CHARGE $chargeLimit")
             if (activeSession != 0) send("CALL_START $activeSession")
             true

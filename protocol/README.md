@@ -30,3 +30,40 @@ notifications or writes (MTU is typically 185-517 on iOS). Reset both stream buf
   made a ring take 1.9 s in M1).
 - Numbers: the host sends `number_raw` and, when possible, `number_e164` (normalised with the SIM's
   country) so the client can match the iPhone Contacts list.
+
+## Remote mode (internet)
+
+Used when Bluetooth is out of range and the user switched Remote mode on. Bluetooth always wins when both are up.
+
+**Key.** The client makes 32 random bytes `K` and sends `RemoteSetup{enabled, key}` **over Bluetooth only** (the host
+ignores it on the internet path). Derived keys, all HKDF-SHA256 with salt `"tosbisim-remote-v1"`, 32 bytes:
+
+| info | use |
+| --- | --- |
+| `room-token` | `room_id = hex(sha256(room_token))`; the server checks this and nothing else |
+| `control` | control messages |
+| `audio` | call audio |
+
+**Control.** Both phones join the Reverb (Pusher protocol 7) presence channel `presence-room.<room_id>`
+(`GET /api/v1/remote` gives the WebSocket URL; `POST /api/v1/remote/auth {socket_id, channel_name, room_token
+(hex), role: host|ios}` signs the subscription; member ids are `host` / `ios`). An envelope travels as client event
+`client-m` with data `{"b": base64(nonce12 || ChaCha20-Poly1305(control key, nonce, plaintext))}`, plaintext =
+`[u64 BE unix ms][Envelope bytes]`, AAD = `"h2c"` (host to client) or `"c2h"`. Receivers drop messages older than
+120 s or whose nonce they have already seen. The session rules are the same as over Bluetooth (Hello first; the
+host serves only the pinned install_id).
+
+**Audio.** Each side takes a TURN allocation on the TosbiSim relay (`POST /api/v1/turn {install_id}` gives short-lived
+REST credentials), the client offers its relay address in `RemoteAudio`, the host answers with its own, and each side
+ChannelBinds (channel 0x4000) the other's relay address. One UDP datagram carries one audio packet:
+`nonce12 || ChaCha20-Poly1305(audio key, nonce, [u16 seq LE][u8 flags][opus])`, AAD `"h2c"` / `"c2h"`, the same
+inner packet as the L2CAP channel (10 ms frames; the receiver's jitter buffer reorders). Allocations are refreshed and
+channels re-bound every 4 minutes while a call lasts; `RemoteAudio{close}` or the call ending releases them.
+
+## Updates
+
+`GET /api/v1/releases/host?since=<versionCode>` lists the host releases newer than `since` (newest first: version,
+code, notes `{en, tr}`, apk `{url, sha256, size}`); `/releases/ios` the same for the iPhone app (no file; `store_url`
+once it is in the App Store). The host checks daily and on `UpdateAction{CHECK}`, downloads the newest APK, checks its
+sha256 and that it is signed with the installed app's key, and reports `HostStatus.update`. It installs on
+`INSTALL_NOW`, or between 02:00 and 05:00 host time once a client has been shown the update and no call is up, unless
+`LATER` set `deferred_until_ms` (one day). Every release carries notes in English and Turkish.

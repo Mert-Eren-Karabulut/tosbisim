@@ -36,6 +36,16 @@ message Envelope {
     VoiceTestHostResult voice_test_host_result = 47; // host -> client
     VoiceTestVerdict voice_test_verdict = 48;      // client -> host: the user's answers; pass turns full voice on
     AudioChannel audio_channel = 50; // M5: open/close the L2CAP audio channel
+    RemoteSetup remote_setup = 51;   // client -> host, over Bluetooth only: remote mode key, or off
+    RemoteAudio remote_audio = 52;   // both ways, remote mode: this call's TURN relay addresses
+    SetMobileData set_mobile_data = 53; // client -> host: the host's mobile data switch
+    UpdateAction update_action = 54;    // client -> host: check / install now / later
+    SetHostWifi set_host_wifi = 55;     // client -> host: "use Wi-Fi when I'm away" (from anywhere)
+    WifiScan wifi_scan = 56;            // client -> host, Bluetooth only: Wi-Fi networks around the host
+    WifiScanResult wifi_scan_result = 57; // host -> client (reply)
+    WifiAdd wifi_add = 58;              // client -> host, Bluetooth only: save a network and try it
+    WifiAddResult wifi_add_result = 59; // host -> client (reply)
+    WifiForget wifi_forget = 60;        // client -> host, Bluetooth only
   }
 }
 
@@ -89,6 +99,12 @@ message HostStatus {
   Hotspot hotspot = 8;           // supersedes hotspot_on when present
   Box box = 9;
   VoiceStatus voice = 10;
+  Remote remote = 11;
+  Update update = 13;            // the host app's own updates
+  bool mobile_data = 12;         // the host's mobile data switch (default-data SIM). The hotspot turns it on;
+                                 // only the user turns it off. Remote mode needs it.
+  HostWifi host_wifi = 14;       // the host's own Wi-Fi connection (not the hotspot)
+  Uplink uplink = 15;            // what the host's own internet runs on right now
   enum VoiceTier { VOICE_TIER_UNSPECIFIED = 0; BASIC = 1; FULL_VOICE = 2; }
 }
 
@@ -162,6 +178,9 @@ message Hotspot {
   repeated Client clients = 11;  // currently connected devices (status only)
   Capabilities capabilities = 12; // what this host phone can do (status only)
   Usage usage = 13;              // data shared through the hotspot, counted on the host (status only)
+  bool starting = 14;            // turning on right now (status only): show "Starting", not off
+  string gateway = 15;           // the hotspot's own IPv4 address while on (status only): lets the client tell
+                                 // it's on this hotspot without reading Wi-Fi names (iOS hides them)
 
   enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
   enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
@@ -246,7 +265,7 @@ message SmsSend {
 message SmsSendResult {
   string client_msg_id = 1;
   bool ok = 2;
-  string error = 3;
+  string error = 3;              // "unconfirmed: ..." = the network never answered (may well be delivered), not a refusal
 }
 
 message SetHotspot { bool on = 1; }
@@ -260,3 +279,108 @@ message SetSim {
 }
 
 message AudioChannel { bool open = 1; }
+
+// Remote (internet) mode, see README.md "Remote mode". The key never leaves the two phones: the client makes it
+// and hands it over Bluetooth; everything on the internet path is sealed with keys derived from it.
+message RemoteSetup {
+  bool enabled = 1;
+  bytes key = 2;                 // 32 random bytes (enabled only)
+}
+
+// Each side's TURN relay address for the current call's audio. The client offers, the host answers;
+// close = true (either side) ends the remote audio.
+message RemoteAudio {
+  string relay_ip = 1;
+  uint32 relay_port = 2;
+  bool close = 3;
+}
+
+message Remote {
+  bool enabled = 1;              // the host holds a key
+  bool online = 2;               // the host is in the rendezvous room now
+}
+
+// The host's mobile data switch. Off is the user's choice (a LAN-only hotspot, or abroad); the hotspot turns it on.
+message SetMobileData { bool on = 1; }
+
+// Host app updates (README.md "Updates"): the host checks api.tosbisim.com, downloads and verifies a newer APK and
+// tells the client. It installs on the user's word, or by itself at night once the client has been told; never
+// during a call. "Later" postpones a day.
+message Update {
+  string current_version = 1;
+  int32 current_code = 2;
+  string available_version = 3;  // empty: up to date
+  int32 available_code = 4;
+  State state = 5;
+  repeated Note notes = 6;       // every version newer than the running one, newest first
+  int64 deferred_until_ms = 7;   // "Later" pressed: no automatic install before this (unix ms)
+  int64 checked_ms = 8;          // last check (unix ms)
+  string error = 9;              // last failure, for the Updates screen
+  enum State { IDLE = 0; CHECKING = 1; DOWNLOADING = 2; READY = 3; INSTALLING = 4; FAILED = 5; }
+  message Note { string version = 1; string en = 2; string tr = 3; }
+}
+
+message UpdateAction {
+  Action action = 1;
+  enum Action { CHECK = 0; INSTALL_NOW = 1; LATER = 2; }
+}
+
+// The host's own Wi-Fi connection (not its hotspot). One rule on every phone (18 Oct 2026), applied by the host
+// once paired: off while the hotspot is on (hotspot users always get mobile data) and while the client is on
+// Bluetooth; when the client has been away a while (2 min), on only if use_when_away (e.g. travelling: the host at home
+// shouldn't spend mobile data), joining a network saved on the host. Never switched during a call. Networks are added
+// and forgotten over Bluetooth only, so Wi-Fi passwords never take the internet path.
+message HostWifi {
+  bool use_when_away = 1;
+  bool on = 2;                   // Wi-Fi radio on right now
+  string connected_ssid = 3;     // empty: not connected
+  repeated Saved saved = 4;      // networks saved on the host (it may join any of them)
+  Reason reason = 5;             // why Wi-Fi is on or off right now
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    SETTING_OFF = 1;             // client away, use_when_away off
+    BLUETOOTH = 2;               // client nearby on Bluetooth
+    HOTSPOT = 3;                 // the hotspot is on
+    AWAY = 4;                    // client away and use_when_away: on
+    IN_CALL = 5;                 // a change waits for the call to end
+    SETUP = 6;                   // on for a moment: scanning or trying a network for the client
+    NOT_PAIRED = 7;              // no client yet: Wi-Fi left as it is
+  }
+  message Saved { int32 id = 1; string ssid = 2; }
+}
+
+message SetHostWifi { bool use_when_away = 1; }
+
+message WifiScan {}
+
+message WifiScanResult {
+  repeated Network networks = 1; // strongest first, one entry per name
+  message Network {
+    string ssid = 1;
+    bool secure = 2;             // needs a password (WPA2/WPA3 personal); enterprise networks are left out
+    int32 level = 3;             // 0..4
+    bool saved = 4;
+  }
+}
+
+message WifiAdd {
+  string ssid = 1;
+  string passphrase = 2;         // empty: open network
+}
+
+message WifiAddResult {
+  string ssid = 1;
+  bool ok = 2;                   // joined (and kept saved); on failure the host forgets it again
+  Problem problem = 3;
+  enum Problem { NONE = 0; NOT_FOUND = 1; JOIN_FAILED = 2; BAD_INPUT = 3; HOTSPOT_ON = 4; }   // JOIN_FAILED: usually the password
+}
+
+message WifiForget { int32 id = 1; }
+
+// The host's current internet connection (its default network), for "Host internet: Wi-Fi · Home" on the client.
+message Uplink {
+  Kind kind = 1;
+  string name = 2;               // Wi-Fi: network name; mobile: the data line's operator
+  enum Kind { NONE = 0; WIFI = 1; MOBILE = 2; OTHER = 3; }
+}
+

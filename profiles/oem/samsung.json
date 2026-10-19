@@ -1,6 +1,6 @@
 {
   "id": "oem/samsung",
-  "comment": "Box-mode settings keys for Samsung One UI (seen on the Galaxy S20 FE, One UI 5.1 / Android 13). Keys a phone lacks are skipped.",
+  "comment": "Box-mode settings keys for Samsung One UI (seen on the Galaxy S20 FE, One UI 5.1 / Android 13). Keys a phone lacks are skipped. screen_off_pocket=0 frees the Touch Pocket Sensor (accidental touch protection) that stays on with the screen off.",
   "match": {
     "manufacturer": [
       "samsung"
@@ -12,7 +12,8 @@
       "aod_tap_to_show_mode": 0,
       "double_tab_to_wake_up": 0,
       "lift_to_wake": 0,
-      "master_motion": 0
+      "master_motion": 0,
+      "screen_off_pocket": 0
     }
   }
 }

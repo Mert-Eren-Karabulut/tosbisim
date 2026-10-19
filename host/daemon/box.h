@@ -12,8 +12,11 @@ void box_charge_check(void);                    // hold the limit (on battery ev
 void box_charge_shutdown(void);                 // release the input cut
 int box_uevent_open(void);                      // netlink socket for power_supply events
 void box_uevent(int fd);
+int box_netblock(int uid, int on);              // box mode: block/unblock an app uid's network (iptables)
 int box_keys_open(void);                        // open volume-key input devices; returns how many
 int box_key_count(void);
+int box_power_block(int on);                   // box mode: grab (1) / release (0) the power key devices
 int box_key_fd(int i);
 void box_key_event(int fd);                     // read events, run the escape gesture
-void box_announce(void);                        // DAEMON_UP broadcast to the host app
+void box_announce(void);
+void box_log_capture(void);                     // rotated copy of our logs in /data/adb/tosbisim/logs                        // DAEMON_UP broadcast to the host app

@@ -91,8 +91,18 @@ class RespondViaMessageService : Service() {
 
 object SmsSender {
     private const val ACTION_SENT = "dev.simrelay.host.SMS_SENT"
+    private const val ACTION_DELIVERED = "dev.simrelay.host.SMS_DELIVERED"
+    /** Messages the network confirmed as delivered: a later "send failed" for them is wrong and dropped. */
+    private val delivered = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    /** When each message went out (elapsedRealtime), to tell a timeout from a real refusal. */
+    private val sentAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     fun send(ctx: Context, s: SmsSend) {
+        if (s.to.isBlank() || s.body.isEmpty()) {
+            Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(s.clientMsgId).setOk(false)
+                .setError("empty number or message").build())
+            return
+        }
         if (s.slot >= 0 && Sims.active(ctx).none { it.simSlotIndex == s.slot }) {
             Log.w(TAG, "SMS send ${s.clientMsgId}: SIM slot ${s.slot} is off or missing")
             Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(s.clientMsgId).setOk(false)
@@ -105,18 +115,42 @@ object SmsSender {
                  else SmsManager.getSmsManagerForSubscriptionId(subId)
         val parts = sm.divideMessage(s.body)
         val sent = ArrayList<PendingIntent>()
+        val delivery = ArrayList<PendingIntent>()
         parts.forEachIndexed { i, _ ->
             val intent = Intent(ACTION_SENT).setPackage(ctx.packageName)
                 .putExtra("id", s.clientMsgId).putExtra("last", i == parts.size - 1)
             sent += PendingIntent.getBroadcast(ctx, (s.clientMsgId + i).hashCode(), intent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            // Delivery reports: MediaTek's VoLTE SMS (Redmi + Vodafone TR, 19 Oct) reported "generic failure" two
+            // minutes after the network had accepted and delivered the message; the report is the real answer.
+            val d = Intent(ACTION_DELIVERED).setPackage(ctx.packageName)
+                .putExtra("id", s.clientMsgId).putExtra("last", i == parts.size - 1)
+            delivery += PendingIntent.getBroadcast(ctx, ("d" + s.clientMsgId + i).hashCode(), d,
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)   // mutable: the system adds the report
         }
+        sentAt[s.clientMsgId] = android.os.SystemClock.elapsedRealtime()
+        if (sentAt.size > 50) sentAt.keys.firstOrNull()?.let { sentAt.remove(it) }
         Log.i(TAG, "SMS send ${s.clientMsgId}: ${parts.size} part(s) on sub $subId")
-        sm.sendMultipartTextMessage(s.to, null, parts, sent, null)
+        sm.sendMultipartTextMessage(s.to, null, parts, sent, delivery)
         ctx.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, ContentValues().apply {
             put(Telephony.Sms.ADDRESS, s.to); put(Telephony.Sms.BODY, s.body)
             put(Telephony.Sms.DATE, System.currentTimeMillis()); put(Telephony.Sms.SUBSCRIPTION_ID, subId)
         })
+    }
+
+    /** Delivery report for the last part: delivered -> "sent" (overrides an earlier reported failure). */
+    class DeliveredReceiver : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            val id = intent.getStringExtra("id") ?: return
+            if (!intent.getBooleanExtra("last", false)) return
+            val pdu = intent.getByteArrayExtra("pdu") ?: return
+            val status = runCatching { android.telephony.SmsMessage.createFromPdu(pdu, intent.getStringExtra("format")).status }.getOrDefault(-1)
+            Log.i(TAG, "SMS $id delivery report: status 0x${Integer.toHexString(status)}")
+            if (status in 0 until 0x20 && delivered.add(id)) {          // TP-Status 0x00-0x1F: delivered
+                while (delivered.size > 50) delivered.remove(delivered.first())
+                Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(id).setOk(true).build())
+            }
+        }
     }
 
     /** Result of each part; we report the last part (or the first failure). */
@@ -124,10 +158,16 @@ object SmsSender {
         override fun onReceive(ctx: Context, intent: Intent) {
             val id = intent.getStringExtra("id") ?: return
             val ok = resultCode == Activity.RESULT_OK
+            if (!ok && id in delivered) { Log.i(TAG, "SMS $id: send failure (result $resultCode) after delivery: ignored"); return }
             if (!ok || intent.getBooleanExtra("last", false)) {
-                Log.i(TAG, "SMS $id sent=$ok (result $resultCode)")
+                // A generic failure only after a long wait is a timeout, not a refusal: MediaTek's VoLTE SMS (Redmi +
+                // Vodafone TR) returns it ~130 s after the network accepted and delivered the message. Real refusals
+                // (no service, bad number) come back within seconds. The client shows "not confirmed", not "failed".
+                val waited = android.os.SystemClock.elapsedRealtime() - (sentAt[id] ?: android.os.SystemClock.elapsedRealtime())
+                val unconfirmed = !ok && resultCode == android.telephony.SmsManager.RESULT_ERROR_GENERIC_FAILURE && waited > 60_000
+                Log.i(TAG, "SMS $id sent=$ok (result $resultCode after ${waited / 1000} s)${if (unconfirmed) ": not confirmed" else ""}")
                 Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(id).setOk(ok)
-                    .setError(if (ok) "" else "result code $resultCode").build())
+                    .setError(if (ok) "" else if (unconfirmed) "unconfirmed: the network didn't confirm in time" else "result code $resultCode").build())
             }
         }
     }

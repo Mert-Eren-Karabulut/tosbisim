@@ -209,14 +209,36 @@ object Sims {
         return call { TelephonyManager::class.java.getMethod("setDataRoamingEnabled", Boolean::class.java).invoke(tm, on) }
     }
 
-    /** VoLTE/VoNR registered for voice (ImsMmTelManager.isAvailable, @SystemApi). Best effort. */
+    /**
+     * VoLTE/VoNR registered for voice. Android 12+: ImsMmTelManager.isAvailable (@SystemApi). Android 11 has no
+     * isAvailable (it threw, so the Redmi Note 8 Pro always showed no VoLTE, 18 Oct): there TelephonyManager's
+     * isVolteAvailable, else the IMS registration state (getRegistrationState, cached 30 s: it answers asynchronously).
+     */
     private fun volte(ctx: Context, sub: Int): Boolean = runCatching {
         val cls = Class.forName("android.telephony.ims.ImsMmTelManager")
         val mgr = cls.getMethod("createForSubscriptionId", Int::class.java).invoke(null, sub)
-        val isAvailable = cls.getMethod("isAvailable", Int::class.java, Int::class.java)
-        // CAPABILITY_TYPE_VOICE = 1; REGISTRATION_TECH_LTE = 0, REGISTRATION_TECH_NR = 3
-        isAvailable.invoke(mgr, 1, 0) as Boolean || isAvailable.invoke(mgr, 1, 3) as Boolean
-    }.getOrDefault(false)
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            val isAvailable = cls.getMethod("isAvailable", Int::class.java, Int::class.java)
+            // CAPABILITY_TYPE_VOICE = 1; REGISTRATION_TECH_LTE = 0, REGISTRATION_TECH_NR = 3
+            return@runCatching isAvailable.invoke(mgr, 1, 0) as Boolean || isAvailable.invoke(mgr, 1, 3) as Boolean
+        }
+        // Android 11: TelephonyManager.isVolteAvailable (hidden, allowed) follows vendor IMS stacks; the AOSP
+        // registration state below missed MediaTek's (Redmi: registered over VoLTE, state said not registered).
+        runCatching {
+            val tmSub = ctx.getSystemService(TelephonyManager::class.java).createForSubscriptionId(sub)
+            TelephonyManager::class.java.getMethod("isVolteAvailable").invoke(tmSub) as Boolean
+        }.getOrNull()?.let { return@runCatching it }
+        imsCache[sub]?.let { (v, at) -> if (android.os.SystemClock.elapsedRealtime() - at < 30_000) return@runCatching v }
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var state = -1
+        cls.getMethod("getRegistrationState", java.util.concurrent.Executor::class.java, java.util.function.Consumer::class.java)
+            .invoke(mgr, imsExec, java.util.function.Consumer<Int> { state = it; latch.countDown() })
+        latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+        (state == 2).also { imsCache[sub] = it to android.os.SystemClock.elapsedRealtime() }   // REGISTRATION_STATE_REGISTERED
+    }.getOrElse { android.util.Log.w("SimRelayHost", "VoLTE check sub $sub: $it"); false }
+
+    private val imsExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val imsCache = java.util.concurrent.ConcurrentHashMap<Int, Pair<Boolean, Long>>()
 
     @SuppressLint("MissingPermission")
     private fun number(ctx: Context, info: SubscriptionInfo): String {

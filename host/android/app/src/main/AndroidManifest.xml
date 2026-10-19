@@ -15,6 +15,9 @@
 
     <!-- normal / runtime (granted with pm grant by the module) -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- api.tosbisim.com: opt-in compatibility reports, live support table -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Dual SIM: per-SIM status (ICCID, switched-off SIMs) and settings (data roaming, data SIM, SIM on/off) -->
     <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" />
     <uses-permission android:name="android.permission.MODIFY_PHONE_STATE" />
@@ -30,6 +33,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Do Not Disturb access (granted by service.sh): keep total silence after setting stream volumes -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <!-- Android 11: the pre-12 Bluetooth permissions (advertising + GATT server) -->
@@ -47,6 +52,9 @@
     <!-- Pre-root check: is Magisk installed? -->
     <queries>
         <package android:name="com.topjohnwu.magisk" />
+        <!-- Box mode blocks their network -->
+        <package android:name="com.google.android.gms" />
+        <package android:name="com.android.vending" />
     </queries>
 
     <application
@@ -108,6 +116,11 @@
                 <data android:scheme="tel" />
             </intent-filter>
         </activity>
+        <receiver android:name=".UpdateReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".DaemonEventReceiver"
             android:exported="true"
@@ -169,6 +182,13 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="dev.simrelay.host.SMS_SENT" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".SmsSender$DeliveredReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.simrelay.host.SMS_DELIVERED" />
             </intent-filter>
         </receiver>
 

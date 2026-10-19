@@ -17,6 +17,7 @@
 #include <linux/netlink.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -46,6 +47,7 @@ static const char *CAP_NODES[] = {
 };
 
 static int g_keys[BOX_MAX_KEYDEVS];
+static int g_power[BOX_MAX_KEYDEVS], g_grabbed[BOX_MAX_KEYDEVS];
 static int g_nkeys = 0;
 static int g_seq[6];          // last six volume presses: +1 up, -1 down
 static long long g_seq_t[6];
@@ -78,8 +80,10 @@ static int valid_pkg(const char *s) {
 }
 
 int box_role(const char *role, const char *pkg) {
-    // Only roles box mode needs; the package name is checked so nothing reaches cmd unescaped.
-    if (!role || strcmp(role, "android.app.role.DIALER") != 0 || !valid_pkg(pkg)) return -1;
+    // Only the roles the host needs (box mode's dialer, the SMS role it guards); the package name is checked so
+    // nothing reaches cmd unescaped.
+    if (!role || (strcmp(role, "android.app.role.DIALER") != 0 && strcmp(role, "android.app.role.SMS") != 0) ||
+        !valid_pkg(pkg)) return -1;
     char *argv[] = { "/system/bin/cmd", "role", "add-role-holder", (char *)role, (char *)pkg, "0", NULL };
     LOGI("role %s -> %s", role, pkg);
     return spawn(argv);
@@ -197,6 +201,53 @@ void box_uevent(int fd) {
     if (power) box_charge_check();
 }
 
+// ------------------------------------------------------------------ network block (box mode)
+//
+// Box mode cuts the network of apps a SIM box never needs (Google Play services: ~7 % of the overnight standby drain
+// on r8q, all background data). Android 13 has no per-package switch reachable from shell, and "restrict background
+// data" doesn't touch Play services' foreground-service processes, so: our own iptables/ip6tables chain matched on
+// the app's uid. Not persistent across reboot by design: box mode re-applies it at boot, and box-off removes it.
+
+#define NB_CHAIN "tosbisim_block"
+
+// Runs a command and returns its exit code. SIGCHLD is normally ignored (fire-and-forget children are auto-reaped),
+// which makes waitpid lose the status, so it is set back to default just for this wait.
+static int run_wait(char *const argv[]) {
+    signal(SIGCHLD, SIG_DFL);
+    pid_t pid;
+    int rc = -1, st = 0;
+    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) == 0 && waitpid(pid, &st, 0) == pid)
+        rc = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+    signal(SIGCHLD, SIG_IGN);
+    return rc;
+}
+
+static int ipt(const char *bin, const char *a1, const char *a2, const char *a3, const char *a4, const char *a5,
+               const char *a6, const char *a7, const char *a8, const char *a9) {
+    char *argv[] = { (char *)bin, "-w", (char *)a1, (char *)a2, (char *)a3, (char *)a4, (char *)a5, (char *)a6,
+                     (char *)a7, (char *)a8, (char *)a9, NULL };
+    return run_wait(argv);
+}
+
+int box_netblock(int uid, int on) {
+    if (uid < 10000 || uid > 99999) return -1;                     // app uids only
+    char u[16];
+    snprintf(u, sizeof(u), "%d", uid);
+    const char *bins[] = { "/system/bin/iptables", "/system/bin/ip6tables" };
+    for (int i = 0; i < 2; i++) {
+        const char *b = bins[i];
+        // Chain + jump from OUTPUT, created once (-N fails harmlessly when it exists).
+        ipt(b, "-N", NB_CHAIN, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        if (ipt(b, "-C", "OUTPUT", "-j", NB_CHAIN, NULL, NULL, NULL, NULL, NULL) != 0)
+            ipt(b, "-I", "OUTPUT", "1", "-j", NB_CHAIN, NULL, NULL, NULL, NULL);
+        int present = ipt(b, "-C", NB_CHAIN, "-m", "owner", "--uid-owner", u, "-j", "REJECT", NULL) == 0;
+        if (on && !present) ipt(b, "-A", NB_CHAIN, "-m", "owner", "--uid-owner", u, "-j", "REJECT", NULL);
+        if (!on) while (ipt(b, "-D", NB_CHAIN, "-m", "owner", "--uid-owner", u, "-j", "REJECT", NULL) == 0) {}
+    }
+    LOGI("network %s for uid %d", on ? "blocked" : "unblocked", uid);
+    return 0;
+}
+
 // ------------------------------------------------------------------ escape gesture
 
 static int has_bit(const unsigned long *bits, int bit) {
@@ -216,10 +267,11 @@ int box_keys_open(void) {
         unsigned long keys[(KEY_MAX + 1) / (8 * sizeof(long)) + 1];
         memset(keys, 0, sizeof(keys));
         if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) >= 0 &&
-            (has_bit(keys, KEY_VOLUMEUP) || has_bit(keys, KEY_VOLUMEDOWN))) {
+            (has_bit(keys, KEY_VOLUMEUP) || has_bit(keys, KEY_VOLUMEDOWN) || has_bit(keys, KEY_POWER))) {
             char name[64] = "?";
             ioctl(fd, EVIOCGNAME(sizeof(name)), name);
-            LOGI("escape gesture: watching %s (%s)", path, name);
+            g_power[g_nkeys] = has_bit(keys, KEY_POWER);
+            LOGI("box keys: watching %s (%s)%s", path, name, g_power[g_nkeys] ? " with the power key" : "");
             g_keys[g_nkeys++] = fd;
         } else {
             close(fd);
@@ -230,6 +282,21 @@ int box_keys_open(void) {
 }
 
 int box_key_fd(int i) { return i < g_nkeys ? g_keys[i] : -1; }
+
+// Box mode: the power button must not wake the screen (19 Oct: on the Redmi each press lit the screen for a
+// moment before box mode turned it off). Grabbing the key devices gives their events to us alone: Android never sees
+// the power key, the escape gesture still works (we read the volume keys from the same fd), and the hardware
+// long-press reset bypasses Android anyway. Released by POWERKEY 0, by the escape gesture, and by the kernel if we die.
+int box_power_block(int on) {
+    int n = 0;
+    for (int i = 0; i < g_nkeys; i++) {
+        if (!g_power[i] || g_grabbed[i] == on) continue;
+        if (ioctl(g_keys[i], EVIOCGRAB, on ? 1 : 0) == 0) { g_grabbed[i] = on; n++; }
+        else LOGW("power key %s: %s", on ? "grab" : "release", strerror(errno));
+    }
+    if (n) LOGI("power key %s (%d device%s)", on ? "blocked" : "released", n, n == 1 ? "" : "s");
+    return n;
+}
 int box_key_count(void) { return g_nkeys; }
 
 static void broadcast(const char *action) {
@@ -237,9 +304,36 @@ static void broadcast(const char *action) {
     spawn(argv);
 }
 
+// Persistent log: logcat's ring buffer (5 MiB) rolls over within hours on a busy day, losing the host's side of
+// a trip (16 Oct 2026). logcat itself writes a rotated copy (2 MiB x 5) of our tags + call/voice/hotspot tags.
+void box_log_capture(void) {
+    mkdir("/data/adb/tosbisim", 0700);
+    mkdir("/data/adb/tosbisim/logs", 0700);
+    // One capture at a time: stop the previous daemon run's logcat (pid file; a pattern kill would match itself).
+    const char *pidf = "/data/adb/tosbisim/logs/logcat.pid";
+    int old = read_int(pidf);
+    if (old > 1) {
+        char comm[64] = "", path[64];
+        snprintf(path, sizeof(path), "/proc/%d/comm", old);
+        int fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) { ssize_t n = read(fd, comm, sizeof(comm) - 1); close(fd); if (n > 0) comm[n] = 0; }
+        if (strncmp(comm, "logcat", 6) == 0) kill(old, SIGTERM);
+    }
+    char *argv[] = { "/system/bin/logcat", "-b", "main,system,crash", "-v", "time",
+        "-f", "/data/adb/tosbisim/logs/host.log", "-r", "2048", "-n", "5",
+        "-s", "SimRelayHost:I", "simrelayd:I", "voice:D", "Telecom:I", "SemWifiApTimeOutImpl:I", "Tethering:W",
+        "AndroidRuntime:E", NULL };
+    pid_t pid;
+    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) != 0) { LOGW("log capture: spawn failed"); return; }
+    FILE *f = fopen(pidf, "we");
+    if (f) { fprintf(f, "%d\n", pid); fclose(f); }
+    LOGI("log capture -> /data/adb/tosbisim/logs/host.log (pid %d)", pid);
+}
+
 void box_announce(void) { broadcast("dev.simrelay.host.DAEMON_UP"); }
 
 static void escape(void) {
+    box_power_block(0);                  // the person at the phone gets their buttons back at once
     LOGI("escape gesture: waking the screen and telling the app");
     box_screen(1);
     broadcast(ESCAPE_ACTION);

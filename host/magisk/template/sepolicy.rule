@@ -1,2 +1,4 @@
 # The host app (priv_app) talks to simrelayd (started by service.sh, domain magisk) over @simrelayd.
 allow priv_app magisk unix_stream_socket { connectto read write getattr }
+# The audio socket (@simrelayd-audio) is SOCK_SEQPACKET.
+allow priv_app magisk unix_seqpacket_socket { connectto read write getattr getopt setopt }

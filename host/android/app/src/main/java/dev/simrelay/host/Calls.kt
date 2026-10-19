@@ -56,9 +56,13 @@ object CallRegistry {
         // media (ringback, "number unavailable" announcements) then reaches the iPhone instead of the host.
         val audible = byId.values.firstOrNull { it.stateCompat == Call.STATE_ACTIVE }
             ?: byId.values.firstOrNull { it.stateCompat == Call.STATE_DIALING }
-        if (audible != null && VoiceGate.allows(ids[audible]?.let { clientUuids[it] }))
-            Daemon.callActive(maxOf(slotOf(audible), 0) + 1)   // slot unknown -> session 1
-        else Daemon.callIdle()
+        if (audible != null && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })) {
+            BasicSilence.set(app, false)
+            Daemon.callActive(Daemon.profile()?.sessionForSlot(maxOf(slotOf(audible), 0)) ?: (maxOf(slotOf(audible), 0) + 1))
+        } else {
+            Daemon.callIdle()
+            BasicSilence.set(app, audible != null)       // a call without relayed audio: keep the host itself quiet
+        }
     }
 
     fun removed(call: Call) {
@@ -173,3 +177,30 @@ object CallRegistry {
 /** Call.Details#getState is API 31; Call#getState (deprecated) gives the same on Android 11. */
 @Suppress("DEPRECATION")
 val Call.stateCompat: Int get() = if (android.os.Build.VERSION.SDK_INT >= 31) details.state else state
+
+/**
+ * Basic mode (no measured audio path yet): an answered call would otherwise use the host's own earpiece and mic, in a
+ * drawer. Without a profile there are no device mutes to apply, so use what every Android phone has: mic mute and
+ * the lowest call volume, restored when the call ends. (Hard rule 1: the host stays silent.)
+ */
+object BasicSilence {
+    private const val TAG = "SimRelayHost"
+    private var saved: Int? = null
+
+    fun set(ctx: android.content.Context, on: Boolean) {
+        val am = ctx.getSystemService(android.media.AudioManager::class.java) ?: return
+        runCatching {
+            if (on && saved == null) {
+                saved = am.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)
+                am.isMicrophoneMute = true
+                am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, am.getStreamMinVolume(android.media.AudioManager.STREAM_VOICE_CALL), 0)
+                android.util.Log.i(TAG, "basic-mode call: host mic muted, call volume at minimum")
+            } else if (!on && saved != null) {
+                am.isMicrophoneMute = false
+                am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, saved!!, 0)
+                saved = null
+                android.util.Log.i(TAG, "basic-mode call over: host mic and call volume restored")
+            }
+        }.onFailure { android.util.Log.w(TAG, "basic-mode silence: $it") }
+    }
+}

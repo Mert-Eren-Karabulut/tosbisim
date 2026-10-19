@@ -4,6 +4,13 @@
     "devices": [
       "r8q"
     ],
+    "platforms": [
+      "kona",
+      "sm8250"
+    ],
+    "manufacturers": [
+      "samsung"
+    ],
     "soc": "SM8250"
   },
   "router": "qcom-legacy",
@@ -31,9 +38,13 @@
     "ramp_ms": 20
   },
   "evidence": "Phase 0 experiments 1-4 on a live call, 15 Oct 2026; guided call test passed 16 Oct 2026",
-  "notes": "Voice session = SIM slot index + 1 (slot 2 -> VoiceMMode2 -> Incall_Music_2 proven; slot 1 unverified). Device mutes need a direct ioctl write (stock tinymix rejects them). Host silence: both Cirrus speaker/earpiece amps held at 'Muted' (enum 0) for the daemon's lifetime; the in-call earpiece route runs through the Left amp (PRI_TDM_RX_0), so this silences ringback, busy/unavailable tones and local call tones too.",
+  "notes": "Voice session by SIM slot: session_by_slot (slot 2 -> VoiceMMode2 -> Incall_Music_2 proven; slot 1 unverified). Family match: Samsung on the kona (SM8250) platform; siblings still run their own call test. Device mutes need a direct ioctl write (stock tinymix rejects them). Host silence: both Cirrus speaker/earpiece amps held at 'Muted' (enum 0) for the daemon's lifetime; the in-call earpiece route runs through the Left amp (PRI_TDM_RX_0), so this silences ringback, busy/unavailable tones and local call tones too.",
   "silence": {
     "Left AMP Mute": 0,
     "Right AMP Mute": 0
+  },
+  "session_by_slot": {
+    "0": 1,
+    "1": 2
   }
 }

@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.location.LocationManager
-import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -31,6 +30,8 @@ import org.json.JSONObject
  *     A key this phone doesn't have is left alone.
  *  4. Radio: LTE only while idle (allowed-network reason POWER, so the user's own choice is untouched);
  *     5G comes back while the hotspot is on. Calls are VoLTE either way.
+ *  6. Network blocked for Google Play services + Play Store (no background data, no app updates on the box):
+ *     simrelayd NETBLOCK, an iptables chain on their uids; re-applied at boot, removed on restore.
  *  5. Wi-Fi client off (16 Oct 2026): no association wake-ups or scans, no Wi-Fi Calling (only VoLTE audio is
  *     measured), and a rooted phone isn't on the home LAN. The hotspot works with the client off; after the
  *     hotspot stops, Android may bring the client back, so we switch it off again.
@@ -44,6 +45,7 @@ object Box {
     private const val REASON_POWER = 1                  // TelephonyManager.ALLOWED_NETWORK_TYPES_REASON_POWER
     private const val BITMASK_NR = 1L shl 19            // TelephonyManager.NETWORK_TYPE_BITMASK_NR
     const val DEFAULT_CHARGE_LIMIT = 80
+    private val NET_BLOCK = listOf("com.google.android.gms", "com.android.vending")
 
     private lateinit var app: Context
     private val main = Handler(Looper.getMainLooper())
@@ -58,6 +60,8 @@ object Box {
     val chargeLimit get() = prefs.getInt("charge_limit", DEFAULT_CHARGE_LIMIT)
     /** Box settings are currently applied (on and not suspended by the escape gesture). */
     private val applied get() = prefs.getBoolean("applied", false)
+    /** The power button is blocked while box settings are applied (the daemon re-grabs it after a restart). */
+    val blocksPowerKey get() = ::app.isInitialized && applied
 
     fun start(ctx: Context, changed: () -> Unit) {
         app = ctx.applicationContext
@@ -103,7 +107,6 @@ object Box {
         hotspotOn = isOn
         if (applied) {
             setLteOnly(!isOn)
-            if (!isOn) main.postDelayed({ if (applied && !hotspotOn) setWifi(false) }, 3000)  // after AP teardown
         }
     }
 
@@ -141,17 +144,16 @@ object Box {
             if (cur != value) write(ns, key, value)
         }
         if (!orig.has("dialer")) orig.put("dialer", app.getSystemService(TelecomManager::class.java).defaultDialerPackage ?: "")
+        // uids whose network box mode blocks (recorded so restore unblocks exactly these)
+        val uids = NET_BLOCK.mapNotNull { runCatching { app.packageManager.getPackageUid(it, 0) }.getOrNull() }.distinct()
+        orig.put("netblock", org.json.JSONArray(uids))
+        uids.forEach { Daemon.netblock(it, true) }
         prefs.edit().putString("orig", orig.toString()).putBoolean("applied", true).apply()
         Daemon.role(DIALER_ROLE, app.packageName)
-        if (!hotspotOn) {
-            if (!orig.has("wifi")) {
-                orig.put("wifi", app.getSystemService(WifiManager::class.java).isWifiEnabled)
-                prefs.edit().putString("orig", orig.toString()).apply()
-            }
-            setWifi(false)
-        }
+        // The host's Wi-Fi follows HostWifi's rule (box mode or not), not box mode.
         setLocation(false)
         setLteOnly(!hotspotOn)
+        Daemon.powerKey(true)                               // no wake-and-flash on a power press (19 Oct)
         if (app.getSystemService(PowerManager::class.java).isInteractive) Daemon.screenOff()
         Log.i(TAG, "box mode applied (${orig.length()} originals saved)")
     }
@@ -159,14 +161,15 @@ object Box {
     private fun restore() {
         val orig = JSONObject(prefs.getString("orig", "{}")!!)
         for (id in orig.keys()) {
-            if (id == "dialer" || id == "location" || id == "wifi") continue
+            if (id == "dialer" || id == "location" || id == "wifi" || id == "netblock") continue
             val (ns, key) = id.split("/", limit = 2)
             write(ns, key, orig.getString(id))
         }
         orig.optString("dialer").takeIf { it.isNotEmpty() && it != app.packageName }?.let { Daemon.role(DIALER_ROLE, it) }
         if (orig.optBoolean("location", false)) setLocation(true)
-        if (orig.optBoolean("wifi", false)) setWifi(true)
+        orig.optJSONArray("netblock")?.let { a -> for (i in 0 until a.length()) Daemon.netblock(a.getInt(i), false) }
         setLteOnly(false)
+        Daemon.powerKey(false)
         prefs.edit().remove("orig").putBoolean("applied", false).apply()
         Log.i(TAG, "box mode restored ${orig.length()} settings")
     }
@@ -215,15 +218,6 @@ object Box {
         }.onFailure { Log.w(TAG, "box: $ns/$key=$value failed: $it") }
     }
 
-    /** Wi-Fi client on/off (allowed for system apps; the hotspot is separate and keeps working). */
-    @Suppress("DEPRECATION")
-    private fun setWifi(on: Boolean) {
-        val wm = app.getSystemService(WifiManager::class.java)
-        if (wm.isWifiEnabled == on) return
-        val ok = runCatching { wm.setWifiEnabled(on) }.getOrDefault(false)
-        Log.i(TAG, "box: Wi-Fi ${if (on) "on" else "off"}${if (ok) "" else " FAILED"}")
-    }
-
     /** Location off in box mode (@SystemApi setLocationEnabledForUser, WRITE_SECURE_SETTINGS). */
     @SuppressLint("MissingPermission")
     private fun setLocation(enabled: Boolean) = runCatching {
@@ -241,12 +235,29 @@ object Box {
         val base = app.getSystemService(TelephonyManager::class.java)
         for (info in Sims.active(app)) runCatching {
             val tm = base.createForSubscriptionId(info.subscriptionId)
+            if (android.os.Build.VERSION.SDK_INT < 31) return@runCatching setLteOnlyR(tm, info.subscriptionId, info.simSlotIndex, lteOnly)
             val set = TelephonyManager::class.java.getMethod("setAllowedNetworkTypesForReason", Int::class.java, Long::class.java)
             val get = TelephonyManager::class.java.getMethod("getAllowedNetworkTypesForReason", Int::class.java)
             val user = get.invoke(tm, 0) as Long                 // REASON_USER: what the user allows
             set.invoke(tm, REASON_POWER, if (lteOnly) user and BITMASK_NR.inv() else user)
             Log.i(TAG, "box: slot ${info.simSlotIndex} ${if (lteOnly) "LTE only (idle)" else "5G allowed"}")
         }.onFailure { Log.w(TAG, "box: network types failed: ${it.cause ?: it}") }
+    }
+
+    /** Android 11 has no per-reason network types (Redmi Note 8 Pro, 19 Oct): no 5G radio -> nothing to do; else
+     *  setAllowedNetworkTypes (@SystemApi, R) with the original remembered per SIM and put back after. */
+    private fun setLteOnlyR(tm: TelephonyManager, sub: Int, slot: Int, lteOnly: Boolean) {
+        val c = TelephonyManager::class.java
+        val supported = c.getMethod("getSupportedRadioAccessFamily").invoke(tm) as Long
+        if (supported and BITMASK_NR == 0L) { if (lteOnly) Log.i(TAG, "box: slot $slot has no 5G radio: LTE only not needed"); return }
+        val key = "allowed_$sub"
+        val cur = c.getMethod("getAllowedNetworkTypes").invoke(tm) as Long
+        val target = if (lteOnly) {
+            if (!prefs.contains(key)) prefs.edit().putLong(key, cur).apply()
+            cur and BITMASK_NR.inv()
+        } else prefs.getLong(key, cur or BITMASK_NR).also { prefs.edit().remove(key).apply() }
+        c.getMethod("setAllowedNetworkTypes", Long::class.java).invoke(tm, target)
+        Log.i(TAG, "box: slot $slot ${if (lteOnly) "LTE only (idle)" else "5G allowed"} (Android 11)")
     }
 }
 

@@ -43,12 +43,14 @@ class SetupActivity : Activity() {
     private var host = false
     @Volatile private var rootOk: Boolean? = null          // asked only when the user taps (Magisk prompts)
     @Volatile private var installState: String? = null     // null, "busy", "ok", or an error
+    @Volatile private var reportState: String? = null      // null, "busy", "ok", or an error
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         host = Compat.isHostInstalled(this)
         // The service owns the relay; make sure it runs (it is normally started by the Magisk module).
         if (host) startForegroundService(Intent(this, HostService::class.java))
+        Api.refreshSupportTable(this)
         // Shown straight after the escape gesture: over the lock screen, which is dismissed if it has no PIN.
         setShowWhenLocked(true)
         setTurnScreenOn(true)
@@ -149,6 +151,7 @@ class SetupActivity : Activity() {
             Compat.Tier.VERIFIED -> State.OK to getString(R.string.tier_verified)
             Compat.Tier.EXPECTED -> State.OK to getString(R.string.tier_expected)
             Compat.Tier.EXPERIMENTAL -> State.WARN to getString(R.string.tier_experimental)
+            Compat.Tier.NOT_YET -> State.WARN to getString(R.string.tier_not_yet)
             Compat.Tier.UNKNOWN -> State.WARN to getString(R.string.tier_unknown)
             Compat.Tier.UNSUPPORTED -> State.FAIL to getString(R.string.tier_unsupported)
         }
@@ -214,6 +217,7 @@ class SetupActivity : Activity() {
             list.addView(text(if (it == "ok") getString(R.string.install_ok) else getString(R.string.install_fail, it), 14f,
                 if (it == "ok") State.OK.color else State.FAIL.color).apply { setPadding(0, dp(10), 0, 0) })
         }
+        addReportButton()
         list.addView(text(getString(R.string.host_version, BuildConfigInfo.version(this)), 12f, Color.GRAY).apply { setPadding(0, dp(16), 0, 0) })
     }
 
@@ -232,7 +236,26 @@ class SetupActivity : Activity() {
             setOnClickListener { Relay.openPairing(); render(steps()) }
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             .apply { topMargin = dp(16) })
+        addReportButton()
         list.addView(text(getString(R.string.host_version, BuildConfigInfo.version(this)), 12f, Color.GRAY).apply { setPadding(0, dp(16), 0, 0) })
+    }
+
+    /** Opt-in, anonymous compatibility report (Api.sendCompatReport): model, chip, Android, audio setup. */
+    private fun addReportButton() {
+        list.addView(Button(this).apply {
+            text = getString(if (reportState == "busy") R.string.btn_sending else R.string.btn_send_report)
+            isEnabled = reportState != "busy" && reportState != "ok"
+            setOnClickListener {
+                reportState = "busy"; refresh.run()
+                Api.sendCompatReport(this@SetupActivity) { ok, detail -> reportState = if (ok) "ok" else detail; main.post { refresh.run() } }
+            }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        val (msg, color) = when (val r = reportState) {
+            null, "busy" -> getString(R.string.report_note) to Color.GRAY
+            "ok" -> getString(R.string.report_sent) to State.OK.color
+            else -> getString(R.string.report_failed, r) to State.FAIL.color
+        }
+        list.addView(text(msg, 12f, color).apply { setPadding(0, dp(4), 0, 0) })
     }
 
     private fun row(st: Step): View = LinearLayout(this).apply {

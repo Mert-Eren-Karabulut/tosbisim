@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 object Compat {
     private const val TAG = "SimRelayHost"
 
-    enum class Tier { VERIFIED, EXPECTED, EXPERIMENTAL, UNKNOWN, UNSUPPORTED }
+    enum class Tier { VERIFIED, EXPECTED, EXPERIMENTAL, NOT_YET, UNKNOWN, UNSUPPORTED }
     data class Verdict(val tier: Tier, val name: String, val note: String)
 
     /** Running as the real host: installed by the Magisk module as a privileged system app. */
@@ -27,7 +27,11 @@ object Compat {
         ctx.checkSelfPermission(Manifest.permission.MODIFY_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
 
     fun verdict(ctx: Context): Verdict {
-        val table = runCatching { JSONObject(ctx.assets.open("support.json").bufferedReader().readText()) }
+        // The live table from api.tosbisim.com when we have one (Api.refreshSupportTable), else the bundled copy.
+        val table = runCatching {
+            val live = File(ctx.filesDir, "support.json")
+            JSONObject(if (live.exists()) live.readText() else ctx.assets.open("support.json").bufferedReader().readText())
+        }
             .onFailure { Log.w(TAG, "support.json: $it") }.getOrNull()
         val maker = Build.MANUFACTURER.lowercase()
         val fallbackName = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
@@ -60,6 +64,14 @@ object Compat {
                 val t = tierOf(p)
                 return Verdict(if (t == Tier.VERIFIED) Tier.EXPECTED else t, "${p.optString("name")} (${Build.MODEL})", local(p, "note"))
             }
+        }
+        // Not listed: the chip platform's call-audio family from the AndroidDumps corpus (support.json "platforms").
+        val fams = table?.optJSONObject("families")
+        val fam = table?.optJSONObject("platforms")?.let { pl -> Profiles.platformNames().firstNotNullOfOrNull { pl.optString(it).ifEmpty { null } } }
+        if (fam != null) {
+            val f = fams?.optJSONObject(fam)
+            val router = f?.optBoolean("router", false) == true
+            return Verdict(if (router) Tier.EXPERIMENTAL else Tier.NOT_YET, fallbackName, f?.let { local(it, "about") }.orEmpty())
         }
         return Verdict(Tier.UNKNOWN, fallbackName, "")
     }
