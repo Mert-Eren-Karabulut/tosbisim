@@ -68,6 +68,7 @@ const T = {
               unsupported: "Can't be used as a host." },
     familiesTitle: "Audio families", famYes: "supported", famNo: "not yet",
     corpus: n => `Search for your phone: over 45,000 models are listed with their state, ${n} of them checked against their firmware.`,
+    oldAndroid: v => `Checked on Android ${v} firmware: the host needs Android 11 or newer.`,
     rulesTitle: "Never supported", none: "Not in the list yet: Basic mode should work; Qualcomm and MediaTek phones can also try the call test.",
     footer: "Same table as the TosbiSim apps", updated: "updated" },
   tr: { title: "TosbiSim hangi telefonlarla çalışır?",
@@ -79,6 +80,7 @@ const T = {
               unsupported: "Ana cihaz olarak kullanılamaz." },
     familiesTitle: "Ses aileleri", famYes: "destekleniyor", famNo: "henüz değil",
     corpus: n => `Telefonunuzu arayın: 45.000'den fazla model durumuyla listeleniyor, ${n} tanesi yazılımına göre incelendi.`,
+    oldAndroid: v => `Android ${v} yazılımında incelendi: ana cihaz için Android 11 veya daha yenisi gerekir.`,
     rulesTitle: "Hiçbir zaman desteklenmeyenler", none: "Henüz listede yok: Temel mod çalışmalı; Qualcomm ve MediaTek telefonlar arama testini de deneyebilir.",
     footer: "TosbiSim uygulamalarıyla aynı tablo", updated: "güncelleme" } };
 const ORDER = ["verified", "expected", "experimental", "not_yet"];
@@ -128,9 +130,11 @@ function render() {
       html += `<h2 style="color:var(--${tier})">${t.tiers[tier]}</h2>`;
       for (const h of hits) {
         const own = h.hand ? DATA.phones.find(p => p.source !== "corpus" && p.models.some(m => h.models.includes(m))) : null;
-        const note = own ? (lang === "tr" ? (own.note_tr || own.note) : own.note) : (lang === "tr" ? (h.reason_tr || h.reason) : h.reason);
+        let note = own ? (lang === "tr" ? (own.note_tr || own.note) : own.note) : (lang === "tr" ? (h.reason_tr || h.reason) : h.reason);
+        if (h.android && h.android < 11) note = [note, t.oldAndroid(h.android)].filter(Boolean).join(" ");
         const name = h.name.toLowerCase().startsWith(h.brand.toLowerCase()) ? h.name : `${h.brand} ${h.name}`;
-        html += phoneHtml(t, tier, name, [h.models.slice(0, 4).join(", "), famName(h.family)].filter(Boolean).join(" · "), note);
+        html += phoneHtml(t, tier, name, [h.models.slice(0, 4).join(", "), famName(h.family),
+                          h.android >= 11 ? `Android ${h.android}` : ""].filter(Boolean).join(" · "), note);
       }
     }
     $("#list").innerHTML = html || `<p class="empty">${t.none}</p>`;
