@@ -598,6 +598,58 @@
       "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G99): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
       "source": "spec: https://www.donanimhaber.com/casper-via-x30-plus-tanitildi-iste-ozellikleri-ve-fiyati--161885",
       "family": "mtk-afe"
+    },
+    {
+      "name": "Galaxy A33 5G",
+      "brand": "Samsung",
+      "models": [
+        "SM-A336B",
+        "SM-A336E"
+      ],
+      "devices": [
+        "a33x"
+      ],
+      "soc": "Exynos 1280",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 1280): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 1280): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a33_5g-ampp-11429.php",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy Note20",
+      "brand": "Samsung",
+      "models": [
+        "SM-N980F"
+      ],
+      "devices": [
+        "c1s"
+      ],
+      "soc": "Exynos 990",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 990): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 990): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_note20-10338.php",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Pixel 8a",
+      "brand": "Google",
+      "models": [
+        "Pixel 8a"
+      ],
+      "devices": [
+        "akita"
+      ],
+      "soc": "Google Tensor G3",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Google Tensor G3): the Google Tensor (Pixel 6 and newer) family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Google Tensor G3): Google Tensor (Pixel 6 ve sonrası) ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://wiki.lineageos.org/devices/akita/",
+      "family": "google-tensor"
     }
   ],
   "rules": [
@@ -741,8 +793,9 @@
       "name": "Google Tensor (Pixel 6 and newer)",
       "name_tr": "Google Tensor (Pixel 6 ve sonrası)",
       "router": false,
-      "about": "Pixel 6 and newer use Google's own audio processor. Call audio isn't supported yet; we're researching it. Basic mode works if the phone can be unlocked.",
-      "about_tr": "Pixel 6 ve sonrası Google'ın kendi ses işlemcisini kullanır. Arama sesi henüz desteklenmiyor; araştırıyoruz. Telefonun kilidi açılabiliyorsa Temel mod çalışır."
+      "about": "Pixel 6 and newer use Google's own audio processor. Its open driver offers the caller's voice alone, a digital input into the call and a route that leaves the earpiece silent; it needs a test phone (Pixel 6a or 7a) before we turn it on. Until then: Basic mode (Verizon Pixels can't be unlocked).",
+      "about_tr": "Pixel 6 ve sonrası Google'ın kendi ses işlemcisini kullanır. Açık kaynak sürücüsü yalnızca karşı tarafın sesini, aramaya dijital bir girişi ve ahizeyi sessiz bırakan bir yolu sunuyor; açmadan önce bir test telefonunda (Pixel 6a veya 7a) denememiz gerekiyor. O zamana kadar: Temel mod (Verizon Pixel'lerin kilidi açılamaz).",
+      "research": "tools/corpus/research/google-tensor.md"
     }
   }
 }

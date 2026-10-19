@@ -52,7 +52,10 @@ object MobileData {
         }
         ctx.contentResolver.registerContentObserver(Settings.Global.CONTENT_URI, true, object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
-                if (uri?.lastPathSegment?.startsWith("mobile_data") == true) obs.onChange(selfChange, uri)
+                // data roaming too: Android 16 applies a change asynchronously, so the status sent right after showed the
+                // old value until something else changed (seen on the Android 16 emulator, 19 Oct)
+                val key = uri?.lastPathSegment.orEmpty()
+                if (key.startsWith("mobile_data") || key.startsWith("data_roaming")) obs.onChange(selfChange, uri)
             }
         })
     }
