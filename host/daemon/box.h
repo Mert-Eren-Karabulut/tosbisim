@@ -12,7 +12,8 @@ void box_charge_check(void);                    // hold the limit (on battery ev
 void box_charge_shutdown(void);                 // release the input cut
 int box_uevent_open(void);                      // netlink socket for power_supply events
 void box_uevent(int fd);
-int box_netblock(int uid, int on);              // box mode: block/unblock an app uid's network (iptables)
+int box_netblock(int uid, int on);
+void box_reap(void);                            // collect finished fire-and-forget children (main loop)              // box mode: block/unblock an app uid's network (iptables)
 int box_keys_open(void);                        // open volume-key input devices; returns how many
 int box_key_count(void);
 int box_power_block(int on);                   // box mode: grab (1) / release (0) the power key devices

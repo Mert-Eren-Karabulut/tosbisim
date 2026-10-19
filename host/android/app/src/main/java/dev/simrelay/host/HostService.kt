@@ -71,7 +71,7 @@ class HostService : Service() {
                 "client" -> { HostWifi.clientOverride = when (intent.getStringExtra("state")) { "away" -> false; "near" -> true; else -> null }
                               HostWifi.evaluate("rig: client ${intent.getStringExtra("state")}") }
                 else -> Log.i(TAG, "WIFI status: ${HostWifi.status().let { "on=${it.on} reason=${it.reason} away=${it.useWhenAway} saved=${it.savedCount} connected=${it.connectedSsid.isNotEmpty()}" }} " +
-                    "hotspot=${Hotspot.info(this).on} uplink=${HostWifi.uplinkKind()} override=${HostWifi.clientOverride}")
+                    "hotspot=${Hotspot.isOn(this)} uplink=${HostWifi.uplinkKind()} override=${HostWifi.clientOverride}")
             }
             "HOTSPOT" -> Hotspot.set(this, intent.getBooleanExtra("on", false)) { ok, d -> Log.i(TAG, "HOTSPOT -> ok=$ok $d") }
             // adb debug: build the automatic profile even if a shipped one exists, and log it

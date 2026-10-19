@@ -64,6 +64,7 @@ class SetupActivity : Activity() {
 
     private val refresh = object : Runnable {
         override fun run() {
+            main.removeCallbacks(this)              // one chain, however often it's run by hand
             if (host) { Daemon.query("HELLO") { r -> daemon = r }; render(steps()) } else renderCompat()
             main.postDelayed(this, 2000)
         }

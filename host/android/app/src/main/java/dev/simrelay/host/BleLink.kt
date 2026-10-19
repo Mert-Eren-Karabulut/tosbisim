@@ -81,9 +81,16 @@ class BleLink(
     private val mtu = ConcurrentHashMap<String, Int>()
     private val queues = ConcurrentHashMap<String, ArrayDeque<ByteArray>>()
     private val inFlight = ConcurrentHashMap<String, Boolean>()
+    private val notifyFails = ConcurrentHashMap<String, Int>()
     @Volatile var audioPsm = 0
 
+    /** GATT service + advertising; with the radio off (left off, or mid-toggle) STATE_ON calls this again. */
     fun start() {
+        if (!radioWatch) {
+            radioWatch = true
+            ctx.registerReceiver(radioReceiver, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
+        }
+        if (bt.adapter?.isEnabled != true) { Log.w(TAG, "Bluetooth is off: GATT service waits for it"); return }
         val service = BluetoothGattService(SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         tx = BluetoothGattCharacteristic(CTRL_TX, BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED).apply {
@@ -95,12 +102,10 @@ class BleLink(
             BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED))
         service.addCharacteristic(BluetoothGattCharacteristic(AUDIO_PSM, BluetoothGattCharacteristic.PROPERTY_READ,
             BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED))
-        gatt = bt.openGattServer(ctx, callback).also { it.addService(service) }
+        val server = bt.openGattServer(ctx, callback) ?: run { Log.w(TAG, "GATT server unavailable (radio turning off?)"); return }
+        server.addService(service)
+        gatt = server
         advertise()
-        if (!radioWatch) {
-            radioWatch = true
-            ctx.registerReceiver(radioReceiver, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
-        }
     }
 
     /**
@@ -115,7 +120,7 @@ class BleLink(
                 android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF -> main.post {
                     Log.i(TAG, "Bluetooth turning off: GATT server down")
                     runCatching { gatt?.close() }; gatt = null
-                    readers.clear(); queues.clear(); inFlight.clear(); mtu.clear()
+                    readers.clear(); queues.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
                 }
                 android.bluetooth.BluetoothAdapter.STATE_ON -> main.post {
                     if (gatt != null) return@post
@@ -198,11 +203,18 @@ class BleLink(
             inFlight[device.address] = true
             val rc = notify(device, chunk)
             if (rc != BluetoothStatusCodes.SUCCESS) {
-                Log.w(TAG, "notify to ${device.address} rc=$rc, retrying in 50 ms")
-                q.addFirst(chunk)
+                val n = (notifyFails[device.address] ?: 0) + 1
                 inFlight[device.address] = false
+                if (n > 100) {                       // ~5 s: the link is gone; its next Hello replays the state
+                    Log.w(TAG, "notify to ${device.address} keeps failing (rc=$rc): dropping ${q.size + 1} queued frames")
+                    q.clear(); notifyFails.remove(device.address)
+                    return
+                }
+                if (n == 1 || n % 20 == 0) Log.w(TAG, "notify to ${device.address} rc=$rc, retrying (#$n)")
+                notifyFails[device.address] = n
+                q.addFirst(chunk)
                 main.postDelayed({ pump(device) }, 50)
-            }
+            } else notifyFails.remove(device.address)
         }
     }
 
@@ -313,14 +325,15 @@ class BleLink(
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
             .setConnectable(true)
             .build()
-        bt.adapter.bluetoothLeAdvertiser.startAdvertising(settings,
+        val adv = bt.adapter?.bluetoothLeAdvertiser ?: run { Log.w(TAG, "no advertiser: Bluetooth is off"); return }
+        adv.startAdvertising(settings,
             AdvertiseData.Builder().addServiceUuid(ParcelUuid(SERVICE)).build(),
             AdvertiseData.Builder().setIncludeDeviceName(true).build(), advCallback)
     }
 
     /** Connectable advertising stops once a central connects; restart it after every real disconnect. */
     private fun restartAdvertising() = main.post {
-        runCatching { bt.adapter.bluetoothLeAdvertiser.stopAdvertising(advCallback) }
-        advertise()
+        runCatching { bt.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advCallback) }
+        if (gatt != null) advertise()
     }
 }

@@ -134,8 +134,7 @@ object HostWifi {
     /** You just left (Bluetooth gone [AWAY_MS]): a hotspot nobody uses is pointless now and would keep the host off
      *  Wi-Fi (18 Oct: any unused hotspot). Only at that moment: one turned on later while away stays. */
     private fun leftHost() {
-        val h = Hotspot.info(app)
-        if (!h.on || h.clientsCount > 0) return
+        if (!Hotspot.isOn(app) || Hotspot.clientCount() > 0) return
         Log.i(TAG, "client left, hotspot unused: turning it off")
         Hotspot.set(app, false) { _, _ -> }
     }
@@ -175,7 +174,7 @@ object HostWifi {
     }
 
     private fun refresh() = exec.execute {
-        val ssid = if (wifiOn()) Regex("Wifi is connected to \"(.*)\"").find(root("cmd wifi status"))?.groupValues?.get(1).orEmpty() else ""
+        val ssid = if (wifiOn()) joinedSsid().orEmpty() else ""
         if (ssid != connectedSsid) {
             connectedSsid = ssid
             Log.i(TAG, "host Wi-Fi: ${if (ssid.isEmpty()) "not connected" else "connected to a saved network"}")
@@ -228,7 +227,7 @@ object HostWifi {
                 var joined = false
                 for (i in 1..40) {          // up to 20 s: association + DHCP
                     Thread.sleep(500)
-                    if (Regex("Wifi is connected to \"(.*)\"").find(root("cmd wifi status"))?.groupValues?.get(1) == ssid) { joined = true; break }
+                    if (joinedSsid() == ssid) { joined = true; break }
                 }
                 if (!joined) listSaved().filter { it.ssid == ssid }.forEach { root("cmd wifi forget-network ${it.id}") }
                 result(joined, when { joined -> WifiAddResult.Problem.NONE; seen == null -> WifiAddResult.Problem.NOT_FOUND
@@ -289,4 +288,7 @@ object HostWifi {
 
     /** One root shell command's output (names and passwords go in through Root.q). */
     private fun root(cmd: String): String = Root.sh(cmd).out
+
+    /** The network the station is joined to (cmd wifi status), null if none. */
+    private fun joinedSsid(): String? = Regex("Wifi is connected to \"(.*)\"").find(root("cmd wifi status"))?.groupValues?.get(1)
 }

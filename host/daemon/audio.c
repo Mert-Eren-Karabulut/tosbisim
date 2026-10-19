@@ -62,6 +62,7 @@ static struct {
     int (*write)(struct pcm *, const void *, unsigned);
     int (*close)(struct pcm *);
     int (*prepare)(struct pcm *);
+    int (*stop)(struct pcm *);       // optional: wakes a reader/writer blocked in the kernel (SNDRV_PCM_IOCTL_DROP)
 } ta;
 
 static int opus_rate_ok(int r) { return r == 8000 || r == 12000 || r == 16000 || r == 24000 || r == 48000; }
@@ -117,6 +118,7 @@ static int ta_load(void) {
     ta.open = dlsym(h, "pcm_open"); ta.is_ready = dlsym(h, "pcm_is_ready"); ta.get_error = dlsym(h, "pcm_get_error");
     ta.read = dlsym(h, "pcm_read"); ta.write = dlsym(h, "pcm_write"); ta.close = dlsym(h, "pcm_close");
     ta.prepare = dlsym(h, "pcm_prepare");
+    ta.stop = dlsym(h, "pcm_stop");
     if (!ta.open || !ta.is_ready || !ta.get_error || !ta.read || !ta.write || !ta.close || !ta.prepare) {
         __android_log_print(ANDROID_LOG_ERROR, "simrelayd", "libtinyalsa: missing symbols");
         ta.open = NULL; return -1;
@@ -151,7 +153,7 @@ static volatile int g_play_period = 480; // inject PCM period in frames at 48 kH
 #define JB_PRIME g_jb_prime
 #define JB_KEEP g_jb_keep
 
-typedef struct { int len; uint8_t data[MAX_PACKET]; } slot_t;
+typedef struct { int len; uint16_t seq; uint8_t data[MAX_PACKET]; } slot_t;   // seq: which packet the slot holds
 
 static audio_cfg_t g_cfg;
 static int g_allowed_uid = -1;
@@ -173,6 +175,7 @@ static int g_jb_win_min = 1000, g_jb_win_n, g_jb_trim;   // adaptive latency: mi
 // Call lifecycle.
 static volatile int g_call_running = 0;
 static pthread_t g_io_t, g_cap_t, g_play_t;
+static int g_cap_started, g_play_started;     // joined only if created
 static int g_io_started = 0;
 
 // Stats (reset each 5 s log line).
@@ -231,6 +234,7 @@ static void jb_reset(void) {
 
 
 // All sequence arithmetic is signed 16-bit (wraparound-safe): "empty" must never look like "65535 queued".
+static int jb_has(uint16_t seq) { return g_jb_valid[seq & JB_MASK] && g_jb[seq & JB_MASK].seq == seq; }   // lock held
 static int16_t jb_depth(void) { return (int16_t)(g_jb_highest - g_jb_next); }   // < 0 = empty
 
 static void jb_put(uint16_t seq, const uint8_t *data, int len) {
@@ -250,8 +254,15 @@ static void jb_put(uint16_t seq, const uint8_t *data, int len) {
         }
     }
     consecutive_late = 0;
+    if ((int16_t)(seq - g_jb_next) >= JB_SLOTS - 1) {
+        // Far ahead of playback (nobody pulled: the inject PCM wasn't open yet): the ring would wrap over unplayed
+        // slots. Play from just before this packet instead of hours-old aliases.
+        g_jb_next = (uint16_t)(seq - (JB_PRIME > 1 ? JB_PRIME - 1 : 0));
+        g_jb_playing = 0;
+    }
     slot_t *s = &g_jb[seq & JB_MASK];
     s->len = len;
+    s->seq = seq;
     memcpy(s->data, data, (size_t)len);
     g_jb_valid[seq & JB_MASK] = 1;
     if ((int16_t)(seq - g_jb_highest) > 0) g_jb_highest = seq;
@@ -271,13 +282,13 @@ static int jb_take(uint8_t *out, int *outlen, int *mode) {
         return 0;
     }
     uint16_t next = g_jb_next;
-    if (g_jb_valid[next & JB_MASK]) {
+    if (jb_has(next)) {
         slot_t *s = &g_jb[next & JB_MASK];
         memcpy(out, s->data, (size_t)s->len);
         *outlen = s->len;
         *mode = 0;
         g_jb_valid[next & JB_MASK] = 0;
-    } else if (g_jb_valid[(uint16_t)(next + 1) & JB_MASK]) {
+    } else if (jb_has((uint16_t)(next + 1))) {
         slot_t *s = &g_jb[(uint16_t)(next + 1) & JB_MASK];
         memcpy(out, s->data, (size_t)s->len);
         *outlen = s->len;
@@ -398,6 +409,29 @@ static struct pcm *open_pcm_n(int device, unsigned flags, unsigned rate, unsigne
     return pcm;
 }
 
+// The PCMs the pump threads hold right now, so CALL_END can wake a thread blocked in pcm_read/pcm_write (once the
+// voice path stops, a read only returns on ALSA's ~10 s timeout, and the daemon's loop would wait in the join).
+enum { LIVE_CAP, LIVE_PLAY };
+static pthread_mutex_t g_live_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct pcm *g_live[2];
+
+static struct pcm *pcm_hold(int slot, struct pcm *pcm) {
+    pthread_mutex_lock(&g_live_lock); g_live[slot] = pcm; pthread_mutex_unlock(&g_live_lock);
+    return pcm;
+}
+
+static void pcm_release(int slot, struct pcm *pcm) {
+    if (!pcm) return;
+    pthread_mutex_lock(&g_live_lock); if (g_live[slot] == pcm) g_live[slot] = NULL; pthread_mutex_unlock(&g_live_lock);
+    ta.close(pcm);
+}
+
+static void pcm_wake_all(void) {
+    pthread_mutex_lock(&g_live_lock);
+    for (int i = 0; i < 2; i++) if (g_live[i] && ta.stop) ta.stop(g_live[i]);
+    pthread_mutex_unlock(&g_live_lock);
+}
+
 static void *capture_main(void *arg) {
     (void)arg;
     set_realtime("capture");
@@ -414,7 +448,7 @@ static void *capture_main(void *arg) {
     opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(LOSS_PERC));
     opus_encoder_ctl(enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
 
-    struct pcm *pcm = open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe);
+    struct pcm *pcm = pcm_hold(LIVE_CAP, open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe));
     if (!pcm) { opus_encoder_destroy(enc); return NULL; }
 
     int16_t pcmbuf[480 * 2];
@@ -432,7 +466,7 @@ static void *capture_main(void *arg) {
     while (g_call_running) {
         if (!pcm) {
             struct timespec slow = { .tv_nsec = 100 * 1000 * 1000 };
-            pcm = open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe);
+            pcm = pcm_hold(LIVE_CAP, open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe));
             if (!pcm) {
                 if (++consecutive_err >= CAP_MAX_ERRORS) { LOGE("capture: cannot reopen, giving up for this call"); break; }
                 nanosleep(&slow, NULL);
@@ -455,9 +489,9 @@ static void *capture_main(void *arg) {
             seq += CAP_FRAMES_PER_READ;
             if (consecutive_err == 1) continue;
             // Repeated faults: reopen the stream (fresh hw params).
-            ta.close(pcm);
+            pcm_release(LIVE_CAP, pcm);
             nanosleep(&backoff, NULL);
-            pcm = open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe);
+            pcm = pcm_hold(LIVE_CAP, open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe));
             continue;                                   // NULL pcm is retried at the top of the loop
         }
         consecutive_err = 0;
@@ -497,7 +531,7 @@ static void *capture_main(void *arg) {
             frames = 0; t0 = now;
         }
     }
-    if (pcm) ta.close(pcm);
+    if (pcm) pcm_release(LIVE_CAP, pcm);
     opus_encoder_destroy(enc);
     return NULL;
 }
@@ -519,7 +553,7 @@ static void *playback_main(void *arg) {
 
     int base = g_play_period;                          // TUNE periods are given in 48 kHz frames
     int period = base * drate / 48000;
-    struct pcm *pcm = open_pcm(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)period);
+    struct pcm *pcm = pcm_hold(LIVE_PLAY, open_pcm(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)period));
     for (int tries = 1; !pcm && g_call_running; tries++) {     // the voice path may not be up yet: retry, don't give up
         struct timespec wait = { .tv_nsec = 200 * 1000 * 1000 };
         nanosleep(&wait, NULL);
@@ -529,10 +563,11 @@ static void *playback_main(void *arg) {
             OpusDecoder *d2 = opus_decoder_create(r2, 1, &err);
             if (d2) { opus_decoder_destroy(dec); dec = d2; drate = r2; ich = c2; dframe = drate / 100; period = base * drate / 48000; }
         }
-        pcm = open_pcm_n(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)period, 2);
+        pcm = pcm_hold(LIVE_PLAY, open_pcm_n(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)period, 2));
         if (pcm) LOGI("inject PCM opened after %d tries", tries + 1);
     }
     if (!pcm) { opus_decoder_destroy(dec); return NULL; }
+    jb_reset();                                         // packets queued while the voice path wasn't up are stale
 
     int16_t mono[480];
     int16_t out[480 * 2];
@@ -545,14 +580,14 @@ static void *playback_main(void *arg) {
 
     while (g_call_running) {
         if (base != g_play_period) {                    // TUNE changed the period: reopen with the new size
-            ta.close(pcm);
+            pcm_release(LIVE_PLAY, pcm);
             base = g_play_period;
             period = base * drate / 48000;
-            pcm = open_pcm_n(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)period, periods);
+            pcm = pcm_hold(LIVE_PLAY, open_pcm_n(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)period, periods));
             LOGI("inject PCM reopened with %d-frame periods: %s", period, pcm ? "ok" : "FAILED");
             if (!pcm) {                                 // fall back to the proven 10 ms
                 g_play_period = base = 480; period = dframe;
-                pcm = open_pcm(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)dframe);
+                pcm = pcm_hold(LIVE_PLAY, open_pcm(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich, (unsigned)dframe));
                 if (!pcm) break;
             }
         }
@@ -592,9 +627,9 @@ static void *playback_main(void *arg) {
             if (slow_windows >= 2 && pcm) {
                 if (periods < 4) periods++;
                 LOGW("inject stream running at %.0f frames/s: reopening with %u periods", 100 / secs, periods);
-                ta.close(pcm);
-                pcm = open_pcm_n(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich,
-                                 (unsigned)period, periods);
+                pcm_release(LIVE_PLAY, pcm);
+                pcm = pcm_hold(LIVE_PLAY, open_pcm_n(g_cfg.inject_pcm, PCM_OUT, (unsigned)drate, (unsigned)ich,
+                                 (unsigned)period, periods));
                 g_st_reopen++;
                 slow_windows = 0;
                 if (!pcm) break;
@@ -609,7 +644,7 @@ static void *playback_main(void *arg) {
             nanosleep(&st, NULL);
         }
     }
-    if (pcm) ta.close(pcm);
+    pcm_release(LIVE_PLAY, pcm);
     opus_decoder_destroy(dec);
     return NULL;
 }
@@ -646,16 +681,20 @@ void audio_call_begin(const audio_cfg_t *cfg) {
     g_cfg = *cfg;
     jb_reset();
     g_call_running = 1;
-    if (pthread_create(&g_cap_t, NULL, capture_main, NULL) != 0) LOGE("capture thread: %s", strerror(errno));
-    if (pthread_create(&g_play_t, NULL, playback_main, NULL) != 0) LOGE("playback thread: %s", strerror(errno));
+    g_cap_started = pthread_create(&g_cap_t, NULL, capture_main, NULL) == 0;
+    if (!g_cap_started) LOGE("capture thread: %s", strerror(errno));
+    g_play_started = pthread_create(&g_play_t, NULL, playback_main, NULL) == 0;
+    if (!g_play_started) LOGE("playback thread: %s", strerror(errno));
     LOGI("audio call begin (loopback=%d)", g_cfg.loopback);
 }
 
 void audio_call_end(void) {
     if (!g_call_running) return;
     g_call_running = 0;
-    pthread_join(g_cap_t, NULL);
-    pthread_join(g_play_t, NULL);
+    pcm_wake_all();                         // a read/write blocked on a stopped voice path returns now
+    if (g_cap_started) pthread_join(g_cap_t, NULL);
+    if (g_play_started) pthread_join(g_play_t, NULL);
+    g_cap_started = g_play_started = 0;
     char t[160];
     audio_totals(t, sizeof(t));            // what flowed each way, for every call (diagnosis without a client)
     LOGI("audio call end: %s", t);

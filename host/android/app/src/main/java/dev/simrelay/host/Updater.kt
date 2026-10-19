@@ -43,6 +43,15 @@ object Updater {
         h.postDelayed({ check() }, 10_000)                  // soon: after an update the iPhone wants "up to date" quickly
         h.postDelayed(nightly, 10 * 60_000)
         h.post { swapDaemonIfNeeded() }
+        h.post { dropInstalledApk() }
+    }
+
+    /** A downloaded update that is this version (or older) was installed: free its ~6 MB. */
+    private fun dropInstalledApk() {
+        if (!apkFile.exists()) return
+        @Suppress("DEPRECATION")
+        val code = runCatching { app.packageManager.getPackageArchiveInfo(apkFile.path, 0)?.versionCode }.getOrNull()
+        if (code == null || code <= myCode()) { apkFile.delete(); Log.i(TAG, "installed update package removed") }
     }
 
     fun status(): Update {
@@ -201,9 +210,9 @@ object Updater {
             if (installedSha.isNotEmpty() && installedSha != sha256(fresh)) {
                 val m = "/data/adb/modules/simrelay-host"
                 Root.sh("cp ${Root.q(fresh.path)} $m/simrelayd.tmp && chmod 755 $m/simrelayd.tmp && " +
-                    "mv -f $m/simrelayd.tmp $m/simrelayd && kill \$(pidof simrelayd)")
+                    "mv -f $m/simrelayd.tmp $m/simrelayd && kill -USR1 \$(pidof simrelayd)")
+                // USR1: the old daemon leaves the host silenced; the new one announces itself (DAEMON_UP -> reconnect)
                 Log.i(TAG, "simrelayd updated from this app version (restarts in 2 s)")
-                h.postDelayed({ Daemon.reconnect() }, 4000)
             }
             refreshModuleFiles(zip)
             fresh.delete(); zip.delete()

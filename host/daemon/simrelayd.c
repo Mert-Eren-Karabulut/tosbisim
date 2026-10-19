@@ -58,7 +58,7 @@
 #define NAME_LEN 44            // SNDRV_CTL_ELEM_ID_NAME_MAXLEN
 #define MAX_MANAGED 64           // a MediaTek profile holds ~20 links during a call; Qualcomm adds its own few
 #define MAX_VALUES 4
-#define OWN_WRITE_GRACE_NS 100000000LL   // ignore change events within 100 ms of our own write
+#define OWN_WRITE_GRACE_NS 100000000LL   // write-only controls: ignore change events within 100 ms of our own write
 
 typedef struct {
     char name[NAME_LEN];
@@ -66,7 +66,8 @@ typedef struct {
     unsigned count;
     long long want[MAX_VALUES];
     int nwant;
-    long long orig[MAX_VALUES];
+    struct snd_ctl_elem_value orig;   // the whole value before we touched it (every channel), restored as is
+    int have_orig;
     int write_only;            // device mutes: no get handler, reads back -1, restore = unmute
     int enumerated;            // ENUM controls use value.enumerated.item, not value.integer.value
     struct timespec last_write;
@@ -92,7 +93,7 @@ static struct {
     int capture_pcm, capture_rate, capture_channels, inject_pcm, inject_rate, inject_channels, loopback;
 } p = { .capture_rate = 16000, .capture_channels = 1, .mute_tx = "Voice Tx Device Mute", .mute_rx = "Voice Rx Device Mute",
         .vsid = 4294967295LL /* ALL_SESSION_VSID */, .ramp = 20,
-        .capture_pcm = 0, .inject_pcm = 23, .inject_rate = 48000, .inject_channels = 2 };
+        .capture_pcm = 0, .inject_pcm = 0 /* every profile sets inject.pcm */, .inject_rate = 48000, .inject_channels = 2 };
 
 // ------------------------------------------------------------------ ALSA controls
 
@@ -114,20 +115,32 @@ static int ctl_read_t(unsigned numid, long long *out, unsigned count, int enumer
     return 0;
 }
 
-static int ctl_write(managed_t *m, const long long *vals, int n) {
-    struct snd_ctl_elem_value v;
-    memset(&v, 0, sizeof(v));
-    v.id.numid = m->numid;
-    for (int i = 0; i < n && i < MAX_VALUES; i++) {
-        if (m->enumerated) v.value.enumerated.item[i] = (unsigned)vals[i];
-        else v.value.integer.value[i] = vals[i];
-    }
+static int ctl_write_value(managed_t *m, struct snd_ctl_elem_value *v) {
+    v->id.numid = m->numid;
     clock_gettime(CLOCK_MONOTONIC, &m->last_write);
-    if (g_ctl < 0 || ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_WRITE, &v) < 0) {
+    if (g_ctl < 0 || ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_WRITE, v) < 0) {
         LOGE("write '%s' failed: %s", m->name, strerror(errno));
         return -1;
     }
     return 0;
+}
+
+// Set the first n channels and leave the others as they are (read-modify-write): "X=1" on a 2-channel switch must not
+// zero channel 2. Write-only controls (no get handler) are written from zero.
+static int ctl_write(managed_t *m, const long long *vals, int n) {
+    struct snd_ctl_elem_value v;
+    memset(&v, 0, sizeof(v));
+    v.id.numid = m->numid;
+    if (!m->write_only && g_ctl >= 0 && ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_READ, &v) < 0) memset(&v.value, 0, sizeof(v.value));
+    for (int i = 0; i < n && i < MAX_VALUES; i++) {
+        if (m->enumerated) v.value.enumerated.item[i] = (unsigned)vals[i];
+        else v.value.integer.value[i] = vals[i];
+    }
+    return ctl_write_value(m, &v);
+}
+
+static void ctl_restore(managed_t *m) {
+    if (m->have_orig) ctl_write_value(m, &m->orig);
 }
 
 // Write a control by name without managing it (start-up / exit safety).
@@ -159,9 +172,13 @@ static managed_t *manage_in(managed_t *list, int *count, const char *name, const
     m->enumerated = info.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED;
     m->nwant = n;
     memcpy(m->want, want, sizeof(long long) * n);
-    if (!write_only) ctl_read_t(m->numid, m->orig, m->count, m->enumerated);
+    if (!write_only) {
+        m->orig.id.numid = m->numid;
+        m->have_orig = g_ctl >= 0 && ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_READ, &m->orig) == 0;
+    }
     ctl_write(m, want, n);
-    LOGI("managed '%s' numid=%u -> %lld (orig %lld)", name, m->numid, want[0], m->orig[0]);
+    LOGI("managed '%s' numid=%u -> %lld (orig %lld)", name, m->numid, want[0],
+         !m->have_orig ? -1LL : m->enumerated ? (long long)m->orig.value.enumerated.item[0] : m->orig.value.integer.value[0]);
     return m;
 }
 
@@ -183,8 +200,9 @@ static int call_control_add(const char *spec) {
     memcpy(g_cc[g_ncc].name, spec, len);
     g_cc[g_ncc].name[len] = 0;
     int n = 0;
-    for (const char *q = eq + 1; *q && n < MAX_VALUES; ) {
+    for (const char *q = eq + 1; *q; ) {
         char *end;
+        if (n == MAX_VALUES) { LOGE("call control '%s': more than %d values", spec, MAX_VALUES); return -1; }
         g_cc[g_ncc].v[n++] = strtoll(q, &end, 0);
         if (*end != ',') break;
         q = end + 1;
@@ -216,7 +234,7 @@ static void restore_all(const char *why) {
             long long off[3] = { 0, p.vsid, p.ramp };
             ctl_write(m, off, 3);
         } else {
-            ctl_write(m, m->orig, (int)(m->count < MAX_VALUES ? m->count : MAX_VALUES));
+            ctl_restore(m);
         }
         LOGI("restored '%s' (%s)", m->name, why);
     }
@@ -269,10 +287,14 @@ static void on_ctl_event(unsigned numid) {
 static void reapply_in(managed_t *list, int count, unsigned numid) {
     for (int i = 0; i < count; i++) {
         managed_t *m = &list[i];
-        if (m->numid != numid || ns_since(&m->last_write) < OWN_WRITE_GRACE_NS) continue;
-        if (!m->write_only) {
+        if (m->numid != numid) continue;
+        if (m->write_only) {
+            // No read-back: our own write's event can't be told apart, so only events after a grace period count.
+            if (ns_since(&m->last_write) < OWN_WRITE_GRACE_NS) continue;
+        } else {
+            // Read back and compare, at any time: a HAL write right after ours (call start) must not slip through.
             long long cur[MAX_VALUES] = { 0 };
-            if (ctl_read_t(numid, cur, m->count, m->enumerated) == 0 && memcmp(cur, m->want, sizeof(long long) * m->nwant) == 0) return;
+            if (ctl_read_t(numid, cur, m->count, m->enumerated) == 0 && memcmp(cur, m->want, sizeof(long long) * m->nwant) == 0) continue;
         }
         LOGW("'%s' rewritten by someone else, re-applying", m->name);
         ctl_write(m, m->want, m->nwant);
@@ -360,7 +382,8 @@ static int neigh(const char *iface, char *out, size_t outlen, int *count) {
         if (sscanf(line, "%63s 0x%x 0x%x %63s %*s %31s", ip, &type, &flags, hw, dev) != 5) continue;
         if (strcmp(dev, iface) != 0 || !(flags & 0x2)) continue;
         size_t used = strlen(out);
-        snprintf(out + used, outlen - used, "%s%s,%s", *count ? ";" : "", hw, ip);
+        int n = snprintf(out + used, outlen - used, "%s%s,%s", *count ? ";" : "", hw, ip);
+        if (n < 0 || (size_t)n >= outlen - used) { out[used] = 0; break; }    // full: whole entries only
         (*count)++;
     }
     fclose(f);
@@ -423,7 +446,7 @@ static void handle_line(int fd, char *line) {
         if (ifstats(strtok(NULL, " "), &rx, &tx) < 0) reply(fd, "ERR no such interface");
         else reply(fd, "OK rx=%lld tx=%lld", rx, tx);
     } else if (strcmp(cmd, "NEIGH") == 0) {
-        char list[400];
+        char list[1400];                                // ~45 devices (a hotspot allows 10-32)
         int n = 0;
         if (neigh(strtok(NULL, " "), list, sizeof(list), &n) < 0) reply(fd, "ERR bad interface");
         else reply(fd, "OK %d %s", n, list);
@@ -511,7 +534,10 @@ static int run_client(const char *script) {
     return rc;
 }
 
-static void on_signal(int sig) { (void)sig; g_stop = 1; }
+// SIGTERM/SIGINT: stop and give the phone its sound back (module disabled or removed). SIGUSR1: restart for an update
+// (Updater.kt): the silence controls and the charge cut stay held, the new daemon takes them over at once.
+static volatile sig_atomic_t g_keep_silence = 0;
+static void on_signal(int sig) { if (sig == SIGUSR1) g_keep_silence = 1; g_stop = 1; }
 
 int main(int argc, char **argv) {
     int card_given = 0;
@@ -547,8 +573,10 @@ int main(int argc, char **argv) {
     struct sigaction sa = { .sa_handler = on_signal };
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
-    signal(SIGCHLD, SIG_IGN);  // box.c spawns input/cmd/am and never waits for them
+    // SIGCHLD stays default: box.c waits for its iptables runs and the loop reaps fire-and-forget children
+    // (ignoring SIGCHLD made waitpid lose exit codes, and flipping it per wait raced with those children).
 
     clear_device_mutes();      // a previous run may have died mid-call
     audio_init((int)g_allowed_uid);
@@ -570,6 +598,7 @@ int main(int argc, char **argv) {
         int nk = box_key_count();
         for (int i = 0; i < nk; i++) fds[4 + i] = (struct pollfd){ .fd = box_key_fd(i), .events = POLLIN };
         // 10 min heartbeat: re-check the charge limit even if a phone sends no battery uevents.
+        box_reap();
         int pr = poll(fds, (nfds_t)(4 + nk), 600000);
         if (pr < 0) { if (errno == EINTR) continue; break; }
         if (pr == 0) { box_charge_check(); continue; }
@@ -613,10 +642,14 @@ int main(int argc, char **argv) {
     }
 
     restore_all("exit");
-    box_charge_shutdown();
-    for (int i = 0; i < g_np; i++) {            // clean exit only: give the phone its sound back
-        ctl_write(&g_perm[i], g_perm[i].orig, 1);
-        LOGI("restored silence control '%s'", g_perm[i].name);
+    if (g_keep_silence) {
+        LOGI("restart for an update: silence controls (%d) and charge limit left held", g_np);
+    } else {
+        box_charge_shutdown();
+        for (int i = 0; i < g_np; i++) {        // clean exit only: give the phone its sound back
+            ctl_restore(&g_perm[i]);
+            LOGI("restored silence control '%s'", g_perm[i].name);
+        }
     }
     audio_shutdown();
     LOGI("simrelayd stopped");

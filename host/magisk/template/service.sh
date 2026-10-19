@@ -32,13 +32,8 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
            RECEIVE_SMS SEND_SMS READ_SMS RECEIVE_MMS RECEIVE_WAP_PUSH; do
     pm grant $PKG android.permission.$p
   done
-  # Host is the default SMS app: SMS arrive via SMS_DELIVER to us (store-and-forward to the client).
-  # Later, only if needed, with a time limit: right after boot `cmd role` can block while the role service starts.
-  ( sleep 90
-    if ! dumpsys role | grep -A3 "name=android.app.role.SMS" | grep -q "$PKG"; then
-      timeout 30 cmd role add-role-holder android.app.role.SMS $PKG 0
-    fi
-    echo "$(date) SMS role: $(dumpsys role | grep -A3 "name=android.app.role.SMS" | grep -o "holders=[^ ]*")" ) &
+  # Default SMS app (SMS arrive via SMS_DELIVER to us): the app claims and guards the role itself (Relay
+  # guardSmsRole, through simrelayd's time-limited ROLE), once the role service is up.
   dumpsys deviceidle whitelist +$PKG
   appops set $PKG WRITE_SETTINGS allow                 # box mode: AOD / wake-gesture keys live in Settings.System
 

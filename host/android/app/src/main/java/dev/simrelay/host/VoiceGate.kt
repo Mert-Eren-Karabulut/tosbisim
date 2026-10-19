@@ -35,7 +35,7 @@ object VoiceGate {
     val fullVoice get() = Daemon.profile() != null && passed
 
     /** May the call with this client UUID carry audio? */
-    fun allows(clientUuid: String?): Boolean = fullVoice || (clientUuid != null && clientUuid == testUuid)
+    fun allows(clientUuid: String?): Boolean = fullVoice || (Daemon.hasProfile() && clientUuid != null && clientUuid == testUuid)
 
     fun status(): VoiceStatus {
         val v = Compat.verdict(app)

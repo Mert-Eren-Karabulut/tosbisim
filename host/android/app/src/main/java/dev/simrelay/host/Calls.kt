@@ -10,7 +10,6 @@ import android.telecom.DisconnectCause
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
 import android.telecom.VideoProfile
-import android.telephony.PhoneNumberUtils
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.util.Log
@@ -157,11 +156,7 @@ object CallRegistry {
         SubscriptionManager.getSlotIndex(subId)
     }.getOrDefault(-1)
 
-    private fun e164(raw: String, slot: Int): String {
-        if (raw.isEmpty()) return ""
-        val iso = Sims.countryIso(app, slot).ifEmpty { "tr" }
-        return PhoneNumberUtils.formatNumberToE164(raw, iso.uppercase()) ?: ""
-    }
+    private fun e164(raw: String, slot: Int): String = Sims.e164(app, raw, slot)
 
     @SuppressLint("MissingPermission")
     private fun accountForSlot(slot: Int): PhoneAccountHandle? {

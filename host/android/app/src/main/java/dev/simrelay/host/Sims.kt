@@ -56,6 +56,16 @@ object Sims {
     fun countryIso(ctx: Context, slot: Int): String =
         active(ctx).firstOrNull { it.simSlotIndex == slot }?.countryIso.orEmpty()
 
+    /** A number in E.164 for the client, read in the country of the SIM it came through: else the network the phone
+     *  is on, else any SIM's country (no fixed default: a UK SIM's "07..." is not a Turkish number). "" if unknown. */
+    fun e164(ctx: Context, raw: String, slot: Int): String {
+        if (raw.isEmpty()) return ""
+        val iso = countryIso(ctx, slot).ifEmpty { ctx.getSystemService(android.telephony.TelephonyManager::class.java).networkCountryIso.orEmpty() }
+            .ifEmpty { active(ctx).firstNotNullOfOrNull { it.countryIso?.takeIf(String::isNotEmpty) }.orEmpty() }
+        return if (iso.isEmpty()) (raw.takeIf { it.startsWith("+") } ?: "")
+        else android.telephony.PhoneNumberUtils.formatNumberToE164(raw, iso.uppercase()) ?: ""
+    }
+
     fun subIdForSlot(ctx: Context, slot: Int): Int =
         active(ctx).firstOrNull { slot < 0 || it.simSlotIndex == slot }?.subscriptionId
             ?: SubscriptionManager.getDefaultSmsSubscriptionId()
@@ -212,7 +222,7 @@ object Sims {
     /**
      * VoLTE/VoNR registered for voice. Android 12+: ImsMmTelManager.isAvailable (@SystemApi). Android 11 has no
      * isAvailable (it threw, so the Redmi Note 8 Pro always showed no VoLTE, 18 Oct): there TelephonyManager's
-     * isVolteAvailable, else the IMS registration state (getRegistrationState, cached 30 s: it answers asynchronously).
+     * isVolteAvailable, else the IMS registration state (getRegistrationState: asynchronous, cached, refreshed every 30 s).
      */
     private fun volte(ctx: Context, sub: Int): Boolean = runCatching {
         val cls = Class.forName("android.telephony.ims.ImsMmTelManager")
@@ -228,13 +238,16 @@ object Sims {
             val tmSub = ctx.getSystemService(TelephonyManager::class.java).createForSubscriptionId(sub)
             TelephonyManager::class.java.getMethod("isVolteAvailable").invoke(tmSub) as Boolean
         }.getOrNull()?.let { return@runCatching it }
-        imsCache[sub]?.let { (v, at) -> if (android.os.SystemClock.elapsedRealtime() - at < 30_000) return@runCatching v }
-        val latch = java.util.concurrent.CountDownLatch(1)
-        var state = -1
-        cls.getMethod("getRegistrationState", java.util.concurrent.Executor::class.java, java.util.function.Consumer::class.java)
-            .invoke(mgr, imsExec, java.util.function.Consumer<Int> { state = it; latch.countDown() })
-        latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)
-        (state == 2).also { imsCache[sub] = it to android.os.SystemClock.elapsedRealtime() }   // REGISTRATION_STATE_REGISTERED
+        // Asynchronous: never wait for it on the caller's (main) thread; the answer fills the cache for the next status.
+        val cached = imsCache[sub]
+        if (cached == null || android.os.SystemClock.elapsedRealtime() - cached.second >= 30_000) {
+            imsCache[sub] = (cached?.first ?: false) to android.os.SystemClock.elapsedRealtime()   // one request at a time
+            cls.getMethod("getRegistrationState", java.util.concurrent.Executor::class.java, java.util.function.Consumer::class.java)
+                .invoke(mgr, imsExec, java.util.function.Consumer<Int> { state ->
+                    imsCache[sub] = (state == 2) to android.os.SystemClock.elapsedRealtime()   // REGISTRATION_STATE_REGISTERED
+                })
+        }
+        cached?.first ?: false
     }.getOrElse { android.util.Log.w("SimRelayHost", "VoLTE check sub $sub: $it"); false }
 
     private val imsExec = java.util.concurrent.Executors.newSingleThreadExecutor()

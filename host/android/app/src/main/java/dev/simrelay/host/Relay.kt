@@ -90,7 +90,7 @@ object Relay {
 
         // Hotspot on/off, connected clients and data usage -> push status to the client (debounced).
         val statusChanged = {
-            val hsOn = Hotspot.info(app).on
+            val hsOn = Hotspot.isOn(app)
             if (hsOn != lastHotspotOn) { lastHotspotOn = hsOn; Box.hotspotChanged(hsOn); HostWifi.evaluate("hotspot ${if (hsOn) "on" else "off"}") }
             main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250); Unit   // widgets: as fast as it's sane
         }
@@ -107,7 +107,7 @@ object Relay {
         DataUsage.init(app, statusChanged)
         Hotspot.watch(app, statusChanged)
         HostWifi.start(app, near = ::bleNear, inCall = { CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED } },
-            paired = { pinned() != null }, hotspotOn = { Hotspot.info(app).on }, changed = statusChanged)
+            paired = { pinned() != null }, hotspotOn = { Hotspot.isOn(app) }, changed = statusChanged)
         // Pairing window open: accept Bluetooth pairing by ourselves (headless hosts can't tap "Pair"). The Hello pin
         // still decides who is served; outside the window Android handles requests as usual.
         app.registerReceiver(object : android.content.BroadcastReceiver() {
@@ -222,6 +222,8 @@ object Relay {
             Envelope.BodyCase.DIAL ->
                 if (!VoiceGate.fullVoice && !env.dial.voiceTest)
                     error(d, env.seq, Error.Code.BAD_REQUEST, "no call audio on this host yet: run the call test")
+                else if (env.dial.voiceTest && !Daemon.hasProfile())   // no audio routes: a test call would unsilence the host
+                    error(d, env.seq, Error.Code.BAD_REQUEST, "this host has no audio profile: the call test can't run")
                 else CallRegistry.dial(env.dial)?.let { error(d, env.seq, Error.Code.BAD_REQUEST, it) }
             Envelope.BodyCase.SMS_ACK -> { SmsStore.ack(app, env.smsAck.id); Log.i(TAG, "SMS ${env.smsAck.id.take(8)} acked") }
             Envelope.BodyCase.SMS_SEND -> SmsSender.send(app, env.smsSend)

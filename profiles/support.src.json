@@ -364,8 +364,9 @@
       "name": "Qualcomm (new audio, 2022+)",
       "name_tr": "Qualcomm (yeni ses, 2022+)",
       "router": false,
-      "about": "Snapdragon 8 Gen 1 and newer, 7s/7+ Gen 2. Not yet: Basic mode works.",
-      "about_tr": "Snapdragon 8 Gen 1 ve sonrası, 7s/7+ Gen 2. Henüz değil: Temel mod çalışır."
+      "about": "Snapdragon 8 Gen 1 and newer, 7s/7+ Gen 2 and other 2022+ chips. Their own audio service has in-call recording and in-call music streams we can use; it needs a test phone before we turn it on. Until then: Basic mode.",
+      "about_tr": "Snapdragon 8 Gen 1 ve sonrası, 7s/7+ Gen 2 ve diğer 2022+ işlemciler. Kendi ses servislerinde kullanabileceğimiz arama içi kayıt ve arama içi müzik akışları var; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: Temel mod.",
+      "research": "tools/corpus/research/qcom-agm.md"
     },
     "mtk-legacy": {
       "name": "MediaTek (older entry-level)",
@@ -384,11 +385,28 @@
       "research": "tools/corpus/research/mtk-legacy.md"
     },
     "unisoc": {
-      "name": "Unisoc",
-      "name_tr": "Unisoc",
+      "name": "Unisoc (T606/T610/T618/T7xx)",
+      "name_tr": "Unisoc (T606/T610/T618/T7xx)",
       "router": false,
-      "about": "Unisoc (Spreadtrum) chips. Not yet: Basic mode works.",
-      "about_tr": "Unisoc (Spreadtrum) işlemciler. Henüz değil: Temel mod çalışır."
+      "about": "Newer Unisoc chips: their audio DSP exposes the call's own downlink and uplink as digital streams; it needs a test phone before we turn it on. Until then: Basic mode.",
+      "about_tr": "Yeni Unisoc işlemciler: ses DSP'leri aramanın kendi gelen ve giden seslerini dijital akış olarak sunuyor; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: Temel mod.",
+      "research": "tools/corpus/research/unisoc.md"
+    },
+    "unisoc-cp": {
+      "name": "Unisoc (SC9863A and older 4G)",
+      "name_tr": "Unisoc (SC9863A ve eski 4G)",
+      "router": false,
+      "about": "Older Unisoc chips handle call audio inside the modem; only a mixed path is visible, which may not be enough. Basic mode.",
+      "about_tr": "Eski Unisoc işlemciler arama sesini modem içinde işler; yalnızca karışık bir yol görünüyor, bu yetmeyebilir. Temel mod.",
+      "research": "tools/corpus/research/unisoc.md"
+    },
+    "unisoc-legacy": {
+      "name": "Unisoc / Spreadtrum (oldest)",
+      "name_tr": "Unisoc / Spreadtrum (en eski)",
+      "router": false,
+      "about": "SC8830-era chips (Android 4-7): no usable call path. Basic mode only, where Android 11 is available.",
+      "about_tr": "SC8830 dönemi işlemciler (Android 4-7): kullanılabilir arama yolu yok. Android 11 varsa yalnızca Temel mod.",
+      "research": "tools/corpus/research/unisoc.md"
     }
   }
 }

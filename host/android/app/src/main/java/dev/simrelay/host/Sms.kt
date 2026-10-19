@@ -12,7 +12,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Telephony
-import android.telephony.PhoneNumberUtils
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import android.util.Log
@@ -58,11 +57,10 @@ class SmsDeliverReceiver : BroadcastReceiver() {
             put(Telephony.Sms.DATE, System.currentTimeMillis()); put(Telephony.Sms.DATE_SENT, ts)
             put(Telephony.Sms.READ, 0); put(Telephony.Sms.SUBSCRIPTION_ID, subId)
         })
-        val iso = Sims.countryIso(ctx, slot).ifEmpty { "tr" }.uppercase()
         val msg = SmsReceived.newBuilder()
             .setId(UUID.randomUUID().toString())
             .setFromRaw(from)
-            .setFromE164(PhoneNumberUtils.formatNumberToE164(from, iso) ?: "")
+            .setFromE164(Sims.e164(ctx, from, slot))
             .setBody(body)
             .setReceivedMs(ts)
             .setSlot(slot)

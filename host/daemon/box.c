@@ -58,7 +58,7 @@ static long long now_ns(void) {
     return (long long)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
 
-// Fire-and-forget (SIGCHLD is ignored, so children are reaped by the kernel).
+// Fire-and-forget: the main loop reaps it (box_reap).
 static int spawn(char *const argv[]) {
     pid_t pid;
     int rc = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
@@ -221,21 +221,20 @@ void box_uevent(int fd) {
 
 #define NB_CHAIN "tosbisim_block"
 
-// Runs a command and returns its exit code. SIGCHLD is normally ignored (fire-and-forget children are auto-reaped),
-// which makes waitpid lose the status, so it is set back to default just for this wait.
+// Runs a command and returns its exit code (same thread as box_reap, which therefore never takes this child).
 static int run_wait(char *const argv[]) {
-    signal(SIGCHLD, SIG_DFL);
     pid_t pid;
     int rc = -1, st = 0;
     if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) == 0 && waitpid(pid, &st, 0) == pid)
         rc = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
-    signal(SIGCHLD, SIG_IGN);
     return rc;
 }
 
+void box_reap(void) { while (waitpid(-1, NULL, WNOHANG) > 0) {} }
+
 static int ipt(const char *bin, const char *a1, const char *a2, const char *a3, const char *a4, const char *a5,
                const char *a6, const char *a7, const char *a8, const char *a9) {
-    char *argv[] = { (char *)bin, "-w", (char *)a1, (char *)a2, (char *)a3, (char *)a4, (char *)a5, (char *)a6,
+    char *argv[] = { (char *)bin, "-w", "5", (char *)a1, (char *)a2, (char *)a3, (char *)a4, (char *)a5, (char *)a6,
                      (char *)a7, (char *)a8, (char *)a9, NULL };
     return run_wait(argv);
 }

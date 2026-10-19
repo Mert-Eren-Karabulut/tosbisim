@@ -27,7 +27,8 @@ data class Profile(val id: String, val json: JSONObject, val source: String = "m
         name("capture", cap.optString("route"))
         name("rec_config", cap.optString("rec_config"))
         name("inject.1", routes?.optString("1"))
-        name("inject.2", routes?.optString("2") ?: routes?.optString("1"))
+        // optString gives "" (not null) for a missing key: a profile with one route uses it on both SIMs' sessions
+        name("inject.2", routes?.optString("2")?.takeIf { it.isNotEmpty() } ?: routes?.optString("1"))
         name("mute.tx", mute?.optString("tx"))
         name("mute.rx", mute?.optString("rx"))
         mute?.let { l += "SET mute.vsid ${it.optLong("vsid", 4294967295L)}"; l += "SET mute.ramp ${it.optInt("ramp_ms", 20)}" }
@@ -113,35 +114,57 @@ object Profiles {
  * VOC_REC_DL as on every legacy platform. Each control must exist on the live card ([has], simrelayd HAS).
  * No host-silence controls are known for an unmeasured phone: the call test asks the user about host sound.
  */
-object AutoProfile {
-    private const val TAG = "SimRelayHost"
+/**
+ * The vendor audio files and what the Qualcomm auto profile reads from them: one parser for [AutoProfile] and the
+ * compatibility report ([Discovery]), so a report shows exactly what the host would build.
+ */
+object VendorAudio {
     private val DIRS = listOf("/vendor/etc", "/odm/etc", "/vendor/etc/audio")
 
-    fun build(has: (String) -> Boolean): Profile? = runCatching {
-        val files = DIRS.flatMap { d -> java.io.File(d).listFiles().orEmpty().toList() }
-        files.firstOrNull { it.name == "audio_device.xml" }?.let { return@runCatching MtkAutoProfile.build(it.readText(), has) }
-        val pcmIds =files.filter { it.name.startsWith("audio_platform_info") && it.name.endsWith(".xml") }
-            .mapNotNull { f -> Regex("""name="USECASE_INCALL_MUSIC_UPLINK"[^>]*id="(\d+)"""").find(f.readText())?.groupValues?.get(1)?.toInt() }
-            .distinct()
-        val mixers = files.filter { it.name.startsWith("mixer_paths") && it.name.endsWith(".xml") }.map { it.readText() }
-        // AOSP names the path incall-music-uplink, Samsung incall_music_uplink.
-        fun pathCtl(suffix: String): String? = mixers.firstNotNullOfOrNull { x ->
+    fun files(): List<java.io.File> = DIRS.flatMap { d -> java.io.File(d).listFiles().orEmpty().toList() }
+    private fun text(f: java.io.File) = runCatching { f.readText() }.getOrDefault("")
+    fun platformInfos(files: List<java.io.File>) = files.filter { it.name.startsWith("audio_platform_info") && it.name.endsWith(".xml") }
+    fun mixers(files: List<java.io.File>) = files.filter { it.name.startsWith("mixer_paths") && it.name.endsWith(".xml") }.map(::text)
+
+    /** USECASE_INCALL_MUSIC_UPLINK PCM ids the vendor lists (one = usable; none or several = find the front end by name). */
+    fun incallMusicPcmIds(files: List<java.io.File>): List<Int> = platformInfos(files)
+        .mapNotNull { f -> Regex("""name="USECASE_INCALL_MUSIC_UPLINK"[^>]*id="(\d+)"""").find(text(f))?.groupValues?.get(1)?.toInt() }
+        .distinct()
+
+    /**
+     * The control that routes in-call music to the uplink for voice session 1 ([two] false) or 2. The
+     * incall-music-uplink(2) path (AOSP dashes, Samsung underscores); older platforms (Snapdragon 660/710/845, Android
+     * 8-9) have no such path and keep the control in "low-latency-playback incall-music" etc. (138 of 862 legacy phones
+     * in the corpus, 19 Oct): then the most used Incall_Music front end, never MultiMedia1 (our capture front end; its
+     * playback side carries system sounds).
+     */
+    fun incallRoute(mixers: List<String>, two: Boolean): String? {
+        val suffix = if (two) "2" else ""
+        mixers.firstNotNullOfOrNull { x ->
             Regex("""<path name="incall[-_]music[-_]uplink$suffix">\s*<ctl name="([^"]+)" value="1"\s*/>""").find(x)?.groupValues?.get(1)
-        }
-        // Older platforms (Snapdragon 660/710/845, Android 8-9) have no incall-music-uplink path: the control sits in
-        // "low-latency-playback incall-music" etc. (138 of 862 legacy phones in the corpus, 19 Oct). Take the most used
-        // Incall_Music front end, never MultiMedia1 (our capture front end; its playback side carries system sounds).
-        fun anyCtl(two: Boolean): String? = mixers.flatMap { x ->
+        }?.let { return it }
+        return mixers.flatMap { x ->
             Regex("""<ctl name="(Incall_Music${if (two) "_2" else ""} Audio Mixer (MultiMedia\d+))" value="1"""").findAll(x).map { it.groupValues }.toList()
         }.filter { it[2] != "MultiMedia1" }.groupingBy { it[1] }.eachCount().maxByOrNull { it.value }?.key
-        val inj1 = pathCtl("") ?: anyCtl(false) ?: run { Log.i(TAG, "auto profile: no incall music control in the vendor paths"); return null }
+    }
+}
+
+object AutoProfile {
+    private const val TAG = "SimRelayHost"
+
+    fun build(has: (String) -> Boolean): Profile? = runCatching {
+        val files = VendorAudio.files()
+        files.firstOrNull { it.name == "audio_device.xml" }?.let { return@runCatching MtkAutoProfile.build(it.readText(), has) }
+        val pcmIds = VendorAudio.incallMusicPcmIds(files)
+        val mixers = VendorAudio.mixers(files)
+        val inj1 = VendorAudio.incallRoute(mixers, false) ?: run { Log.i(TAG, "auto profile: no incall music control in the vendor paths"); return null }
         // The PCM: the platform-info id when the vendor lists one, else by name. The route names its front end
         // ("Incall_Music Audio Mixer MultiMedia9" -> PCM "MultiMedia9"): 9 of 29 legacy phones in the AndroidDumps
         // corpus list no id (the HAL then uses its built-in default), 19 Oct.
         val fe = Regex("""Audio Mixer (MultiMedia\d+)""").find(inj1)?.groupValues?.get(1)
         val pcm = pcmIds.singleOrNull() ?: fe?.let { AsoundPcm.byName()[it] }
             ?: run { Log.i(TAG, "auto profile: incall music PCM ids $pcmIds, front end $fe not found by name"); return null }
-        val inj2 = pathCtl("2") ?: anyCtl(true) ?: inj1.replace("Incall_Music ", "Incall_Music_2 ")
+        val inj2 = VendorAudio.incallRoute(mixers, true) ?: inj1.replace("Incall_Music ", "Incall_Music_2 ")
         val names = listOf("MultiMedia1 Mixer VOC_REC_DL", inj1, inj2, "Voice Tx Device Mute", "Voice Rx Device Mute")
         val missing = names.filterNot(has)
         if (missing.isNotEmpty()) { Log.i(TAG, "auto profile: missing controls $missing"); return null }
@@ -164,11 +187,15 @@ object AutoProfile {
  */
 object Discovery {
     fun audio(): org.json.JSONObject = runCatching {
-        val dirs = listOf("/vendor/etc", "/odm/etc", "/vendor/etc/audio")
-        val files = dirs.flatMap { d -> java.io.File(d).listFiles().orEmpty().toList() }
+        val files = VendorAudio.files()
         val o = org.json.JSONObject()
+        // What AutoProfile itself would pick (same parser)
+        val mixers = VendorAudio.mixers(files)
+        o.put("auto_inject_route", VendorAudio.incallRoute(mixers, false) ?: "")
+        o.put("auto_inject_route2", VendorAudio.incallRoute(mixers, true) ?: "")
+        o.put("auto_incall_pcm_ids", org.json.JSONArray(VendorAudio.incallMusicPcmIds(files)))
         val ids = org.json.JSONObject()
-        files.filter { it.name.startsWith("audio_platform_info") && it.name.endsWith(".xml") }.forEach { f ->
+        VendorAudio.platformInfos(files).forEach { f ->
             val t = runCatching { f.readText() }.getOrDefault("")
             val m = Regex("""name="(USECASE_INCALL_MUSIC_UPLINK2?|USECASE_INCALL_REC_[A-Z_]+|USECASE_VOICE_CALL)"[^>]*id="(\d+)"""").findAll(t)
             val one = org.json.JSONObject()

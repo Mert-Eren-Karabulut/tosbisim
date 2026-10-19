@@ -28,13 +28,16 @@ object Root {
             .apply { isDaemon = true; start() }
         if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
             p.destroyForcibly()
-            Log.w(TAG, "root: timed out after ${timeoutMs / 1000} s: ${cmd.take(60)}")
+            Log.w(TAG, "root: timed out after ${timeoutMs / 1000} s: ${logged(cmd)}")
             reader.join(500)
             return Result(-1, synchronized(out) { out.toString() } + "timeout")
         }
         reader.join(2000)
         Result(p.exitValue(), synchronized(out) { out.toString() })
     }.getOrElse { Result(-1, "su: $it") }
+
+    /** A command as it may appear in a log: cut before the first quoted word ([q]: SSIDs, passwords, paths). */
+    private fun logged(cmd: String) = cmd.substringBefore('\'').take(60).trimEnd() + if ('\'' in cmd) " …" else ""
 
     /** One shell word, whatever it contains. */
     fun q(s: String): String = "'" + s.replace("'", "'\\''") + "'"

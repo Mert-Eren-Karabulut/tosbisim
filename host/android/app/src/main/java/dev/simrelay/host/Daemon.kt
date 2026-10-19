@@ -21,6 +21,10 @@ import java.util.concurrent.Executors
 object Daemon {
     private const val TAG = "SimRelayHost"
     private val exec = Executors.newSingleThreadExecutor { Thread(it, "daemon-client") }
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    // A daemon stuck in one command (it joins audio threads at CALL_END: up to ~10 s) must not hold every later
+    // command forever: the read gives up, the request reconnects (CALL_START is re-sent if a call is on).
+    private const val READ_TIMEOUT_MS = 20_000
     private var sock: LocalSocket? = null
     private var reader: BufferedReader? = null
     private var out: OutputStream? = null
@@ -61,7 +65,8 @@ object Daemon {
     /** Build the automatic profile now (debug: on a phone that has a shipped one too) and log it. */
     fun tryAutoProfile(done: (Profile?) -> Unit) = exec.execute {
         connect()
-        done(AutoProfile.build { n -> runCatching { send("HAS $n") }.getOrNull()?.startsWith("OK") == true })
+        val p = AutoProfile.build { n -> runCatching { send("HAS $n") }.getOrNull()?.startsWith("OK") == true }
+        main.post { done(p) }
     }
 
     /** The daemon (re)started: reconnect now so silence controls and the charge limit are re-applied. */
@@ -73,14 +78,15 @@ object Daemon {
     fun wake() = exec.execute { request("WAKE") }
     fun role(role: String, pkg: String) = exec.execute { request("ROLE $role $pkg") }
 
-    /** Charge cap; [done] gets true if applied, false if this phone has no cap node or it failed. */
+    /** Charge cap; [done] (on main) gets true if applied, false if this phone has no cap node or it failed. */
     fun charge(percent: Int, done: (Boolean) -> Unit = {}) = exec.execute {
         chargeLimit = percent
-        done(request("CHARGE $percent")?.startsWith("OK") == true)
+        val ok = request("CHARGE $percent")?.startsWith("OK") == true
+        main.post { done(ok) }
     }
 
-    /** One request whose reply the caller needs (e.g. IFSTATS); [done] runs on the daemon thread. */
-    fun query(line: String, done: (String?) -> Unit) = exec.execute { done(request(line)) }
+    /** One request whose reply the caller needs (e.g. IFSTATS); [done] runs on main, never on the daemon thread. */
+    fun query(line: String, done: (String?) -> Unit) = exec.execute { val r = request(line); main.post { done(r) } }
 
     private fun connect(): Boolean {
         if (sock != null) return true
@@ -89,6 +95,7 @@ object Daemon {
         return try {
             val s = LocalSocket()
             s.connect(LocalSocketAddress("simrelayd", LocalSocketAddress.Namespace.ABSTRACT))
+            s.soTimeout = READ_TIMEOUT_MS
             sock = s
             reader = BufferedReader(InputStreamReader(s.inputStream))
             out = s.outputStream

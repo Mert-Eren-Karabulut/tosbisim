@@ -154,13 +154,9 @@ function render() {
     const phones = DATA.phones.filter(p => p.tier === tier && hit(p));
     if (!phones.length) continue;
     html += `<h2 style="color:var(--${tier})">${t.tiers[tier]}</h2>`;
-    for (const p of phones) {
-      const note = lang === "tr" ? (p.note_tr || p.note) : p.note;
-      html += `<div class="phone"><div class="top"><span class="name">${esc(p.brand)} ${esc(p.name)}</span>
-        <span class="meta">${esc(p.models.join(", "))} · ${esc(p.soc)}</span>
-        <span class="badge" style="color:var(--${tier});border:1px solid var(--${tier})">${t.tiers[tier]}</span></div>
-        <div class="note">${esc(note)}</div></div>`;
-    }
+    for (const p of phones)
+      html += phoneHtml(t, tier, `${p.brand} ${p.name}`, [p.models.join(", "), p.soc, famName(p.family)].filter(Boolean).join(" · "),
+                        lang === "tr" ? (p.note_tr || p.note) : p.note);
   }
   if (!q) html += `<p class="empty">${t.corpus(DATA.phones.filter(p => p.source === "corpus").length)}</p>`;
   html += `<h2>${t.familiesTitle}</h2>` + Object.values(fams).map(f => `<div class="phone"><div class="top"><span class="name">${esc(lang === "tr" ? (f.name_tr || f.name) : f.name)}</span>

@@ -2,8 +2,8 @@
   {
     "version": "0.11.3",
     "code": 35,
-    "en": "Older Snapdragon phones (such as 625, 660, 710, 820, 835): the host now sets up their call audio too.\nMediaTek phones: every audio link that keeps the host silent during a call is now held (with long audio profiles, the last ones could be skipped).\nCharge limit works on more phones.\nSystem commands always have a time limit, so a stuck one can't freeze the host.",
-    "tr": "Eski Snapdragon telefonlar (625, 660, 710, 820, 835 gibi): ana cihaz artık bunların arama sesini de kuruyor.\nMediaTek telefonlar: arama sırasında ana cihazı sessiz tutan tüm ses bağlantıları artık tutuluyor (uzun ses profillerinde sondakiler atlanabiliyordu).\nŞarj sınırı daha fazla telefonda çalışıyor.\nSistem komutlarının her zaman bir süre sınırı var; takılan bir komut ana cihazı donduramaz."
+    "en": "Older Snapdragon phones (such as 625, 660, 710, 820, 835): the host now sets up their call audio too.\nYour voice no longer arrives garbled after a long ring on outgoing calls.\nThe host stays silent during its own updates and holds every audio link that keeps it silent in a call.\nMore robust: Bluetooth switched off and on, slow system commands, numbers from UK SIMs.",
+    "tr": "Eski Snapdragon telefonlar (625, 660, 710, 820, 835 gibi): ana cihaz artık bunların arama sesini de kuruyor.\nGiden aramalarda uzun çalmadan sonra sesiniz artık bozuk gitmiyor.\nAna cihaz kendi güncellemeleri sırasında sessiz kalıyor ve aramada onu sessiz tutan tüm ses bağlantılarını tutuyor.\nDaha sağlam: Bluetooth kapatılıp açıldığında, yavaş sistem komutlarında, İngiltere SIM'lerinden gelen numaralarda."
   },
   {
     "version": "0.11.2",
