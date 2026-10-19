@@ -15,4 +15,9 @@ NINJA="$(dirname "$CMAKE")/ninja"
   -DCMAKE_MAKE_PROGRAM="$NINJA" >/dev/null
 out=$("$CMAKE" --build build/arm64-v8a --target simrelayd 2>&1) || { echo "$out" | grep -E "error|Error" ; echo "BUILD FAILED"; exit 1; }
 mkdir -p out/arm64-v8a && cp build/arm64-v8a/simrelayd out/arm64-v8a/simrelayd
+# Every loadable segment 16 KB-aligned (Android 15+ 16 KB-page kernels won't run anything less)
+READELF="$NDK/toolchains/llvm/prebuilt/$(ls "$NDK/toolchains/llvm/prebuilt" | head -1)/bin/llvm-readelf"
+for a in $("$READELF" -lW out/arm64-v8a/simrelayd | awk '$1 == "LOAD" { print $NF }'); do
+  [ $((a)) -ge 16384 ] || { echo "simrelayd: a segment is aligned to $a, below 16 KB"; exit 1; }
+done
 echo "built out/arm64-v8a/simrelayd"

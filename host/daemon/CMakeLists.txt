@@ -15,5 +15,8 @@ add_subdirectory(third_party/opus-1.5.2 opus EXCLUDE_FROM_ALL)
 # PCM I/O: the phone's own /system/lib64/libtinyalsa.so, loaded at runtime (see audio.c ta_load).
 
 add_executable(simrelayd simrelayd.c audio.c box.c)
+# 16 KB-aligned segments: Android 15+ phones may run 16 KB-page kernels, where a 4 KB-aligned binary won't start (no call
+# audio, box mode or charge limit on that host). 16 KB alignment also runs on 4 KB kernels.
+target_link_options(simrelayd PRIVATE "-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
 target_compile_options(simrelayd PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(simrelayd PRIVATE opus log m dl)

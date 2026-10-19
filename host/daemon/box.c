@@ -229,38 +229,26 @@ void box_uevent(int fd) {
 #define NB_CHAIN "tosbisim_block"
 
 // Runs a command and returns its exit code (same thread as box_reap, which therefore never takes this child).
-static int run_wait(char *const argv[]) {
-    pid_t pid;
-    int rc = -1, st = 0;
-    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) == 0 && waitpid(pid, &st, 0) == pid)
-        rc = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
-    return rc;
-}
-
 void box_reap(void) { while (waitpid(-1, NULL, WNOHANG) > 0) {} }
 
-static int ipt(const char *bin, const char *a1, const char *a2, const char *a3, const char *a4, const char *a5,
-               const char *a6, const char *a7, const char *a8, const char *a9) {
-    char *argv[] = { (char *)bin, "-w", "5", (char *)a1, (char *)a2, (char *)a3, (char *)a4, (char *)a5, (char *)a6,
-                     (char *)a7, (char *)a8, (char *)a9, NULL };
-    return run_wait(argv);
-}
-
+// The rules change runs as one detached script: iptables waits for the system's xtables lock (-w 5 per call, a dozen
+// calls), which inside the main loop could stall the socket, the keys and the escape gesture for up to a minute
+// (audit, 19 Oct). The loop's reaper collects it.
 int box_netblock(int uid, int on) {
     if (uid < 10000 || uid > 99999) return -1;                     // app uids only
-    char u[16];
-    snprintf(u, sizeof(u), "%d", uid);
-    const char *bins[] = { "/system/bin/iptables", "/system/bin/ip6tables" };
-    for (int i = 0; i < 2; i++) {
-        const char *b = bins[i];
-        // Chain + jump from OUTPUT, created once (-N fails harmlessly when it exists).
-        ipt(b, "-N", NB_CHAIN, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-        if (ipt(b, "-C", "OUTPUT", "-j", NB_CHAIN, NULL, NULL, NULL, NULL, NULL) != 0)
-            ipt(b, "-I", "OUTPUT", "1", "-j", NB_CHAIN, NULL, NULL, NULL, NULL);
-        int present = ipt(b, "-C", NB_CHAIN, "-m", "owner", "--uid-owner", u, "-j", "REJECT", NULL) == 0;
-        if (on && !present) ipt(b, "-A", NB_CHAIN, "-m", "owner", "--uid-owner", u, "-j", "REJECT", NULL);
-        if (!on) while (ipt(b, "-D", NB_CHAIN, "-m", "owner", "--uid-owner", u, "-j", "REJECT", NULL) == 0) {}
-    }
+    char script[1024];
+    snprintf(script, sizeof(script),
+        "for b in /system/bin/iptables /system/bin/ip6tables; do "
+        "$b -w 5 -N " NB_CHAIN " 2>/dev/null; "                        // chain + jump from OUTPUT, created once
+        "$b -w 5 -C OUTPUT -j " NB_CHAIN " 2>/dev/null || $b -w 5 -I OUTPUT 1 -j " NB_CHAIN "; "
+        "%s; done",
+        on ? "$b -w 5 -C " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT 2>/dev/null || $b -w 5 -A " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT"
+           : "while $b -w 5 -D " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT 2>/dev/null; do :; done");
+    char cmd[1200];
+    snprintf(cmd, sizeof(cmd), script, uid);
+    char *argv[] = { "/system/bin/sh", "-c", cmd, NULL };
+    pid_t pid;
+    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) != 0) { LOGW("network block: spawn failed"); return -1; }
     LOGI("network %s for uid %d", on ? "blocked" : "unblocked", uid);
     return 0;
 }

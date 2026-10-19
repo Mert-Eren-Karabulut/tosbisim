@@ -682,8 +682,8 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGUSR1, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
-    // SIGCHLD stays default: box.c waits for its iptables runs and the loop reaps fire-and-forget children
-    // (ignoring SIGCHLD made waitpid lose exit codes, and flipping it per wait raced with those children).
+    // SIGCHLD stays default: the loop reaps fire-and-forget children (the network-block script, am broadcasts);
+    // ignoring SIGCHLD made waitpid lose exit codes.
 
     box_charge_init();         // first: a previous run may have died while cutting the charge (the battery would drain)
     crumb_start();             // before any mixer write: did the last boot end while we were writing?

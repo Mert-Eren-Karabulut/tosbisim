@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.3",
+    "code": 39,
+    "en": "Newer phones: the host's background service now also runs on Android 15+ phones whose kernel uses 16 KB memory pages (before, it couldn't start there, so call audio, box mode and the charge limit were missing).\nBox mode's app blocking no longer holds up the host while Android's network settings are busy.",
+    "tr": "Yeni telefonlar: ana cihazın arka plan hizmeti artık çekirdeği 16 KB bellek sayfası kullanan Android 15 ve üstü telefonlarda da çalışıyor (önceden orada başlayamıyordu; arama sesi, kutu modu ve şarj sınırı eksik kalıyordu).\nKutu modunun uygulama engellemesi, Android'in ağ ayarları meşgulken ana cihazı artık bekletmiyor."
+  },
+  {
     "version": "0.12.2",
     "code": 38,
     "en": "Pairing is simpler: \"Add host\" on the iPhone lists only hosts ready to pair, and a host with no iPhone is always ready. Hosts keep one Bluetooth address, so a host just picked can't vanish, and Android 13+ hosts accept pairing on their own.\nMuch harder to break: audio settings are checked before they are written, and after a crash while writing them the host stays safe for that boot; the host restarts itself if it ever stops; Bluetooth switched off comes back on; the power button is only blocked when the escape gesture works; the charge limit can never leave the battery draining.\nA screen-lock warning: with a PIN, the host can't start after a restart.",
