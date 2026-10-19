@@ -298,6 +298,306 @@
       "note_tr": "Doğrulanan Redmi Note 8 Pro ile aynı MediaTek ses ailesi (Helio P65, MT6768 platformu).",
       "source": "docs/desk-study/galaxy-a31.md",
       "family": "mtk-afe"
+    },
+    {
+      "name": "Galaxy A32",
+      "brand": "Samsung",
+      "models": [
+        "SM-A325F",
+        "SM-A325M"
+      ],
+      "devices": [
+        "a32"
+      ],
+      "soc": "MediaTek Helio G80 (MT6769V)",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio G80 (MT6769V)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G80 (MT6769V)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a32-10753.php",
+      "family": "mtk-afe"
+    },
+    {
+      "name": "Galaxy A22",
+      "brand": "Samsung",
+      "models": [
+        "SM-A225F",
+        "SM-A225M"
+      ],
+      "devices": [
+        "a22"
+      ],
+      "soc": "MediaTek Helio G80 (MT6769V)",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio G80 (MT6769V)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G80 (MT6769V)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a22-10948.php",
+      "family": "mtk-afe"
+    },
+    {
+      "name": "Galaxy A05",
+      "brand": "Samsung",
+      "models": [
+        "SM-A055F",
+        "SM-A055M"
+      ],
+      "devices": [
+        "a05m"
+      ],
+      "soc": "MediaTek Helio G85 (MT6769V)",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio G85 (MT6769V)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G85 (MT6769V)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a05-12583.php",
+      "family": "mtk-afe"
+    },
+    {
+      "name": "Galaxy A02s",
+      "brand": "Samsung",
+      "models": [
+        "SM-A025F",
+        "SM-A025G",
+        "SM-A025M"
+      ],
+      "devices": [
+        "a02q"
+      ],
+      "soc": "Snapdragon 450",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Chip from the maker's specs (Snapdragon 450): our Qualcomm (classic audio) family. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Snapdragon 450): Qualcomm (klasik ses) ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a02s-10603.php",
+      "family": "qcom-legacy"
+    },
+    {
+      "name": "Galaxy A13",
+      "brand": "Samsung",
+      "models": [
+        "SM-A135F",
+        "SM-A135M"
+      ],
+      "devices": [
+        "a13"
+      ],
+      "soc": "Exynos 850",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 850): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 850): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a13-11402.php",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy A04s",
+      "brand": "Samsung",
+      "models": [
+        "SM-A047F",
+        "SM-A047M"
+      ],
+      "devices": [
+        "a04s"
+      ],
+      "soc": "Exynos 850",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 850): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 850): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://www.gsmarena.com/samsung_galaxy_a04s-11803.php",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy A03s",
+      "brand": "Samsung",
+      "models": [
+        "SM-A037F",
+        "SM-A037M",
+        "SM-A037G"
+      ],
+      "devices": [
+        "a03s"
+      ],
+      "soc": "MediaTek Helio P35 (MT6765)",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio P35 (MT6765)): the MediaTek (older entry-level) family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio P35 (MT6765)): MediaTek (eski giriş seviyesi) ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a03s-10937.php",
+      "family": "mtk-legacy"
+    },
+    {
+      "name": "Galaxy A35",
+      "brand": "Samsung",
+      "models": [
+        "SM-A356B",
+        "SM-A356E"
+      ],
+      "devices": [
+        "a35x"
+      ],
+      "soc": "Exynos 1380",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 1380): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 1380): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_a35-12705.php",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy A53",
+      "brand": "Samsung",
+      "models": [
+        "SM-A536B",
+        "SM-A536E"
+      ],
+      "devices": [
+        "a53x"
+      ],
+      "soc": "Exynos 1280",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 1280): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 1280): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://www.gsmarena.com/samsung_galaxy_a53_5g-11268.php",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy S22",
+      "brand": "Samsung",
+      "models": [
+        "SM-S901B"
+      ],
+      "devices": [
+        "r0s"
+      ],
+      "soc": "Exynos 2200",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 2200): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 2200): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://m.gsmarena.com/samsung_galaxy_s22_5g-11253.php",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy S10",
+      "brand": "Samsung",
+      "models": [
+        "SM-G973F"
+      ],
+      "devices": [
+        "beyond1"
+      ],
+      "soc": "Exynos 9820",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 9820): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 9820): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: GSMArena spec sheet; same chip as the S10e dump (dumps/samsung/beyond0)",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Galaxy S10+",
+      "brand": "Samsung",
+      "models": [
+        "SM-G975F"
+      ],
+      "devices": [
+        "beyond2"
+      ],
+      "soc": "Exynos 9820",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Exynos 9820): the Samsung Exynos family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Exynos 9820): Samsung Exynos ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: GSMArena spec sheet; same chip as the S10e dump (dumps/samsung/beyond0)",
+      "family": "exynos-abox"
+    },
+    {
+      "name": "Tecno Spark 10C",
+      "brand": "Tecno",
+      "models": [
+        "TECNO KI5k"
+      ],
+      "devices": [
+        "TECNO-KI5k"
+      ],
+      "soc": "Unisoc T606",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (Unisoc T606): the Unisoc (T606/T610/T618/T7xx) family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Unisoc T606): Unisoc (T606/T610/T618/T7xx) ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://m.gsmarena.com/tecno_spark_10c-12199.php",
+      "family": "unisoc"
+    },
+    {
+      "name": "Tecno Spark 10",
+      "brand": "Tecno",
+      "models": [
+        "TECNO KI5q"
+      ],
+      "devices": [
+        "TECNO-KI5q"
+      ],
+      "soc": "MediaTek Helio G37 (MT6765)",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio G37 (MT6765)): the MediaTek (older entry-level) family, not supported for call audio yet. Basic mode works if the phone can be rooted.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G37 (MT6765)): MediaTek (eski giriş seviyesi) ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
+      "source": "spec: https://www.gsmarena.com/tecno_spark_10-12178.php",
+      "family": "mtk-legacy"
+    },
+    {
+      "name": "Tecno Camon 20",
+      "brand": "Tecno",
+      "models": [
+        "TECNO CK6n"
+      ],
+      "devices": [
+        "TECNO-CK6n"
+      ],
+      "soc": "MediaTek Helio G85 (MT6769Z)",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio G85 (MT6769Z)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G85 (MT6769Z)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "source": "spec: https://telset.id/harga-spesifikasi/tecno/tecno-camon-20",
+      "family": "mtk-afe"
+    },
+    {
+      "name": "Infinix Hot 30",
+      "brand": "Infinix",
+      "models": [
+        "Infinix X6831"
+      ],
+      "devices": [],
+      "soc": "MediaTek Helio G88 (MT6769H)",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio G88 (MT6769H)): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G88 (MT6769H)): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "source": "spec: https://m.gsmarena.com/infinix_hot_30-12214.php",
+      "family": "mtk-afe"
+    },
+    {
+      "name": "Casper VIA X30",
+      "brand": "Casper",
+      "models": [
+        "VIA X30",
+        "VIA X30 Plus"
+      ],
+      "devices": [
+        "VIA_X30",
+        "VIA_X30_Plus"
+      ],
+      "soc": "MediaTek Helio G99",
+      "tier": "experimental",
+      "profile": null,
+      "note": "Chip from the maker's specs (MediaTek Helio G99): our MediaTek family. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (MediaTek Helio G99): MediaTek ailemiz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde.",
+      "source": "spec: https://www.donanimhaber.com/casper-via-x30-plus-tanitildi-iste-ozellikleri-ve-fiyati--161885",
+      "family": "mtk-afe"
     }
   ],
   "rules": [
@@ -313,13 +613,42 @@
     {
       "manufacturers": [
         "oppo",
-        "realme",
         "vivo",
         "iqoo"
       ],
       "tier": "unsupported",
       "reason": "These phones almost never allow bootloader unlocking.",
       "reason_tr": "Bu telefonlar önyükleyici kilidinin açılmasına neredeyse hiç izin vermez."
+    },
+    {
+      "manufacturers": [
+        "realme"
+      ],
+      "tier": "unsupported",
+      "reason": "Realme allows bootloader unlocking on only a few models (its Deep Testing app); most can't be rooted.",
+      "reason_tr": "Realme önyükleyici kilidinin açılmasına yalnızca birkaç modelde (Deep Testing uygulaması) izin verir; çoğu root'lanamaz.",
+      "source": "https://www.thetechoutlook.com/news/os/realme-gt-8-and-realme-gt-8-pro-official-bootloader-unlocking-tool-now-available-in-china/"
+    },
+    {
+      "manufacturers": [
+        "lge",
+        "lg"
+      ],
+      "tier": "unsupported",
+      "reason": "LG closed its bootloader unlock service at the end of 2021, so LG phones can't be rooted any more.",
+      "reason_tr": "LG önyükleyici kilit açma hizmetini 2021 sonunda kapattı, bu yüzden LG telefonlar artık root'lanamaz.",
+      "source": "https://www.xda-developers.com/lg-bootloader-unlocking-shut-down-december-31/"
+    },
+    {
+      "manufacturers": [
+        "hmd global",
+        "hmd",
+        "nokia"
+      ],
+      "tier": "unsupported",
+      "reason": "HMD (Nokia) phones don't allow bootloader unlocking.",
+      "reason_tr": "HMD (Nokia) telefonlar önyükleyici kilidinin açılmasına izin vermez.",
+      "source": "https://nokiamob.net/2019/11/02/official-nokia-mobile-will-remove-the-option-to-unlock-the-nokia-7-2-and-nokia-6-2-bootloader/"
     },
     {
       "manufacturers": [
@@ -407,6 +736,13 @@
       "about": "SC8830-era chips (Android 4-7): no usable call path. Basic mode only, where Android 11 is available.",
       "about_tr": "SC8830 dönemi işlemciler (Android 4-7): kullanılabilir arama yolu yok. Android 11 varsa yalnızca Temel mod.",
       "research": "tools/corpus/research/unisoc.md"
+    },
+    "google-tensor": {
+      "name": "Google Tensor (Pixel 6 and newer)",
+      "name_tr": "Google Tensor (Pixel 6 ve sonrası)",
+      "router": false,
+      "about": "Pixel 6 and newer use Google's own audio processor. Call audio isn't supported yet; we're researching it. Basic mode works if the phone can be unlocked.",
+      "about_tr": "Pixel 6 ve sonrası Google'ın kendi ses işlemcisini kullanır. Arama sesi henüz desteklenmiyor; araştırıyoruz. Telefonun kilidi açılabiliyorsa Temel mod çalışır."
     }
   }
 }
