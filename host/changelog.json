@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.11.2",
+    "code": 34,
+    "en": "After the host restarts (an update, for example), your iPhone reconnects within seconds instead of minutes, even when it's locked.",
+    "tr": "Ana cihaz yeniden başladıktan sonra (örneğin bir güncellemede) iPhone'unuz, kilitliyken bile dakikalar yerine saniyeler içinde yeniden bağlanıyor."
+  },
+  {
+    "version": "0.11.1",
+    "code": 33,
+    "en": "Call audio sets itself up on many more phones: the host builds its own audio profile on MediaTek phones and on more Qualcomm phones, and adjusts audio settings to what the phone accepts.\nSupport check: phones show their audio family, including families not supported yet.",
+    "tr": "Arama sesi çok daha fazla telefonda kendini kuruyor: ana cihaz MediaTek telefonlarda ve daha fazla Qualcomm telefonda kendi ses profilini oluşturuyor ve ses ayarlarını telefonun kabul ettiğine göre uyarlıyor.\nUyumluluk kontrolü: telefonlar, henüz desteklenmeyenler dahil ses ailesini gösteriyor."
+  },
+  {
     "version": "0.11.0",
     "code": 32,
     "en": "MediaTek phones: call audio works both ways (tested on the Redmi Note 8 Pro).\nBox mode: the power button no longer lights the screen.\nThe host keeps its place as the default SMS app, so no SMS goes missing.\nSMS the network never confirms show as \"not confirmed\" instead of failed.\nAndroid 11: VoLTE shown correctly.",

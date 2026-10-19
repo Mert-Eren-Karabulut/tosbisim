@@ -75,29 +75,50 @@ const T = {
   en: { title: "Which phones work with TosbiSim?",
     lead: "TosbiSim turns a spare rooted Android phone into a SIM box for your iPhone. Every phone runs a short call test before call audio turns on; texts, call control and the hotspot work in Basic mode on most rootable Android 11+ phones.",
     search: "Search a model, e.g. A52 or Redmi Note 10",
-    tiers: { verified: "Verified", expected: "Expected to work", experimental: "Experimental", not_yet: "Not yet", unsupported: "Not supported" },
+    tiers: { verified: "Verified", expected: "Expected to work", experimental: "Experimental", not_yet: "Not yet", unsupported: "Not supported", unknown: "Not researched yet" },
     legend: { verified: "Measured by us on a live call.", expected: "Its own firmware matches a verified phone's audio family.",
               experimental: "Our audio family, not confirmed yet.", not_yet: "Audio family we can't drive yet: Basic mode only.",
               unsupported: "Can't be used as a host." },
     familiesTitle: "Audio families", famYes: "supported", famNo: "not yet",
-    corpus: n => `${n} more phones were checked against their firmware: search for yours.`,
+    corpus: n => `Search for your phone: over 45,000 models are listed with their state, ${n} of them checked against their firmware.`,
     rulesTitle: "Never supported", none: "Not in the list yet: Basic mode should work; Qualcomm and MediaTek phones can also try the call test.",
     footer: "Same table as the TosbiSim apps", updated: "updated" },
   tr: { title: "TosbiSim hangi telefonlarla çalışır?",
     lead: "TosbiSim, root'lu yedek bir Android telefonu iPhone'unuz için bir SIM kutusuna dönüştürür. Her telefonda arama sesi kısa bir arama testinden sonra açılır; root'lanabilen çoğu Android 11+ telefonda mesajlar, arama yönetimi ve erişim noktası Temel modda çalışır.",
     search: "Model arayın, ör. A52 veya Redmi Note 10",
-    tiers: { verified: "Doğrulandı", expected: "Çalışması bekleniyor", experimental: "Deneysel", not_yet: "Henüz değil", unsupported: "Desteklenmiyor" },
+    tiers: { verified: "Doğrulandı", expected: "Çalışması bekleniyor", experimental: "Deneysel", not_yet: "Henüz değil", unsupported: "Desteklenmiyor", unknown: "Henüz incelenmedi" },
     legend: { verified: "Canlı aramada bizim tarafımızdan ölçüldü.", expected: "Kendi yazılımı doğrulanmış bir telefonun ses ailesiyle uyuşuyor.",
               experimental: "Bizim ses ailemiz, henüz doğrulanmadı.", not_yet: "Henüz yönetemediğimiz ses ailesi: yalnızca Temel mod.",
               unsupported: "Ana cihaz olarak kullanılamaz." },
     familiesTitle: "Ses aileleri", famYes: "destekleniyor", famNo: "henüz değil",
-    corpus: n => `${n} telefon daha yazılımlarına göre incelendi: kendinizinkini arayın.`,
+    corpus: n => `Telefonunuzu arayın: 45.000'den fazla model durumuyla listeleniyor, ${n} tanesi yazılımına göre incelendi.`,
     rulesTitle: "Hiçbir zaman desteklenmeyenler", none: "Henüz listede yok: Temel mod çalışmalı; Qualcomm ve MediaTek telefonlar arama testini de deneyebilir.",
     footer: "TosbiSim uygulamalarıyla aynı tablo", updated: "güncelleme" } };
 const ORDER = ["verified", "expected", "experimental", "not_yet"];
 let lang = (navigator.language || "en").toLowerCase().startsWith("tr") ? "tr" : "en";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// The full phone index (~46k phones) lives on api.tosbisim.com; this page's own table answers instantly and offline.
+const API = "https://api.tosbisim.com/api/v1/devices?q=";
+let remote = null, remoteFor = "", timer = null;
+function search() {
+  const q = $("#q").value.trim();
+  render();
+  clearTimeout(timer);
+  if (q.length < 2) { remote = null; return; }
+  timer = setTimeout(async () => {
+    try {
+      const r = await fetch(API + encodeURIComponent(q));
+      if (r.ok && $("#q").value.trim() === q) { remote = (await r.json()).results; remoteFor = q.toLowerCase(); render(); }
+    } catch (e) { /* offline: keep the page's own matches */ }
+  }, 300);
+}
+function phoneHtml(t, tier, name, meta, note) {
+  return `<div class="phone"><div class="top"><span class="name">${esc(name)}</span>
+    <span class="meta">${esc(meta)}</span>
+    <span class="badge" style="color:var(--${tier});border:1px solid var(--${tier})">${t.tiers[tier] || tier}</span></div>
+    ${note ? `<div class="note">${esc(note)}</div>` : ""}</div>`;
+}
 function render() {
   const t = T[lang];
   document.documentElement.lang = lang;
@@ -111,6 +132,24 @@ function render() {
   // ~1400 phones come from firmware dumps (source "corpus"): shown when searched for, not listed up front
   const hit = p => q ? [p.brand, p.name, p.soc, ...p.models].join(" ").toLowerCase().includes(q) : p.source !== "corpus";
   let html = "";
+  const fams = DATA.families || {};
+  const famName = f => f && fams[f] ? (lang === "tr" ? (fams[f].name_tr || fams[f].name) : fams[f].name) : "";
+  if (q && remote && remoteFor === q) {
+    for (const tier of [...ORDER, "unsupported", "unknown"]) {
+      const hits = remote.filter(h => h.tier === tier);
+      if (!hits.length) continue;
+      html += `<h2 style="color:var(--${tier})">${t.tiers[tier]}</h2>`;
+      for (const h of hits) {
+        const own = h.hand ? DATA.phones.find(p => p.source !== "corpus" && p.models.some(m => h.models.includes(m))) : null;
+        const note = own ? (lang === "tr" ? (own.note_tr || own.note) : own.note) : (lang === "tr" ? (h.reason_tr || h.reason) : h.reason);
+        const name = h.name.toLowerCase().startsWith(h.brand.toLowerCase()) ? h.name : `${h.brand} ${h.name}`;
+        html += phoneHtml(t, tier, name, [h.models.slice(0, 4).join(", "), famName(h.family)].filter(Boolean).join(" · "), note);
+      }
+    }
+    $("#list").innerHTML = html || `<p class="empty">${t.none}</p>`;
+    $("#rules").innerHTML = DATA.rules.map(r => `<li>${esc(lang === "tr" ? (r.reason_tr || r.reason) : r.reason)}</li>`).join("");
+    return;
+  }
   for (const tier of ORDER) {
     const phones = DATA.phones.filter(p => p.tier === tier && hit(p));
     if (!phones.length) continue;
@@ -124,7 +163,6 @@ function render() {
     }
   }
   if (!q) html += `<p class="empty">${t.corpus(DATA.phones.filter(p => p.source === "corpus").length)}</p>`;
-  const fams = DATA.families || {};
   html += `<h2>${t.familiesTitle}</h2>` + Object.values(fams).map(f => `<div class="phone"><div class="top"><span class="name">${esc(lang === "tr" ? (f.name_tr || f.name) : f.name)}</span>
     <span class="badge" style="color:var(--${f.router ? "verified" : "not_yet"});border:1px solid var(--${f.router ? "verified" : "not_yet"})">${f.router ? t.famYes : t.famNo}</span></div>
     <div class="note">${esc(lang === "tr" ? (f.about_tr || f.about) : f.about)}</div></div>`).join("");
@@ -132,7 +170,7 @@ function render() {
   $("#rules").innerHTML = DATA.rules.map(r => `<li>${esc(lang === "tr" ? (r.reason_tr || r.reason) : r.reason)}</li>`).join("");
 }
 document.querySelectorAll(".lang button").forEach(b => b.onclick = () => { lang = b.dataset.lang; render(); });
-$("#q").oninput = render;
+$("#q").oninput = search;
 render();
 </script>
 </body>

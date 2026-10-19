@@ -98,9 +98,13 @@ int box_role(const char *role, const char *pkg) {
 // Driven by power_supply uevents (no polling); the limit is persisted so it is back at boot before the app is.
 // Fail-safe: the cut is released at start, at exit, below MIN_ON_BATTERY and whenever no limit is set.
 
-static const char *CUT_NODES[] = {
-    "/sys/class/power_supply/battery/batt_slate_mode",                 // Samsung: 1 = run from the battery
-    "/sys/class/power_supply/battery/input_suspend",                   // Qualcomm: 1 = charger input suspended
+// Each cut node with the value that stops charging (the other value lets it charge again). charging_enabled is the
+// most common node in the firmware corpus (422 phones, Qualcomm smb and MediaTek chargers; 19 Oct): it holds the
+// battery on charger power instead of running from it, which also holds the limit.
+static const struct { const char *path; int stop; } CUT_NODES[] = {
+    { "/sys/class/power_supply/battery/batt_slate_mode", 1 },           // Samsung: 1 = run from the battery
+    { "/sys/class/power_supply/battery/input_suspend", 1 },             // Qualcomm/MediaTek: 1 = charger input suspended
+    { "/sys/class/power_supply/battery/charging_enabled", 0 },          // 0 = don't charge
 };
 #define BATT_CAPACITY "/sys/class/power_supply/battery/capacity"
 #define LIMIT_DIR "/data/adb/tosbisim"
@@ -115,7 +119,12 @@ static const char *first_writable(const char *const *nodes, size_t n) {
     return NULL;
 }
 static const char *cap_node(void) { return first_writable(CAP_NODES, sizeof(CAP_NODES) / sizeof(CAP_NODES[0])); }
-static const char *cut_node(void) { return first_writable(CUT_NODES, sizeof(CUT_NODES) / sizeof(CUT_NODES[0])); }
+/** The first writable cut node (index into CUT_NODES), or -1. */
+static int cut_index(void) {
+    for (size_t i = 0; i < sizeof(CUT_NODES) / sizeof(CUT_NODES[0]); i++) if (access(CUT_NODES[i].path, W_OK) == 0) return (int)i;
+    return -1;
+}
+static const char *cut_node(void) { int i = cut_index(); return i < 0 ? NULL : CUT_NODES[i].path; }
 
 static int read_int(const char *path) {
     int fd = open(path, O_RDONLY | O_CLOEXEC);
@@ -137,8 +146,10 @@ static int write_int(const char *path, int v) {
 }
 
 static void set_cut(int on) {
-    const char *node = cut_node();
-    if (!node || write_int(node, on) < 0) return;
+    int i = cut_index();
+    if (i < 0) return;
+    const char *node = CUT_NODES[i].path;
+    if (write_int(node, on ? CUT_NODES[i].stop : !CUT_NODES[i].stop) < 0) return;
     if (g_cutting != on) LOGI("charge limit: %s (%s)", on ? "running on battery down to the limit" : "charger power back", node);
     g_cutting = on;
 }

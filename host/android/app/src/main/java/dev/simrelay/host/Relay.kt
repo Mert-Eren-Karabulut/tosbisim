@@ -403,6 +403,16 @@ object Relay {
                 ble.connectedDevices().any { it.address == d.address }) {
                 Log.i(TAG, "no Hello from ${d.address} after 5 s: dropping the link so it reconnects fresh")
                 ble.disconnect(d)
+                // The iPhone owns the link (it's the central): cancelConnection rarely drops it, and a locked iPhone's
+                // app then hears nothing for minutes (19 Oct, after a self-update: 170 s+, reproduced). Switching our
+                // Bluetooth off and on is a real disconnect, which iOS always delivers: Hello within 3 s. Never in a call.
+                main.postDelayed({
+                    if (d.address !in trusted && ble.connectedDevices().any { it.address == d.address } &&
+                        CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) {
+                        Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the iPhone reconnects")
+                        Root.background("svc bluetooth disable; sleep 2; svc bluetooth enable")
+                    }
+                }, 3000)
             }
         }, 5000)
     }

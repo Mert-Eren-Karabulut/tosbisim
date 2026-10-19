@@ -159,13 +159,8 @@ object Updater {
         if (CallRegistry.snapshot().any { it.state != dev.simrelay.protocol.v1.CallEvent.State.ENDED }) {
             set(Update.State.READY, ""); return "after the call"     // a call started during the pause
         }
-        val cmd = "cp '${apkFile.path}' /data/local/tmp/tosbisim-update.apk && chmod 644 /data/local/tmp/tosbisim-update.apk && " +
-            "pm install -r /data/local/tmp/tosbisim-update.apk; rc=\$?; rm -f /data/local/tmp/tosbisim-update.apk; exit \$rc"
-        val out = runCatching {
-            val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
-            val text = p.inputStream.bufferedReader().readText()
-            p.waitFor(); text.trim()
-        }.getOrElse { it.toString() }
+        val tmp = "/data/local/tmp/tosbisim-update.apk"
+        val out = Root.sh("cp ${Root.q(apkFile.path)} $tmp && chmod 644 $tmp && pm install -r $tmp; rc=\$?; rm -f $tmp; exit \$rc", 180_000).out.trim()
         // Success replaces this process before we get here, usually; if we're still alive, it failed.
         Log.e(TAG, "update install: $out")
         val why = if (out.contains("Permission denied", true) || out.contains("not allowed", true))
@@ -202,12 +197,11 @@ object Updater {
             app.assets.open("module/tosbisim-host-module.zip").use { i -> zip.outputStream().use { o -> i.copyTo(o) } }
             val fresh = File(app.cacheDir, "simrelayd")
             ZipFile(zip).use { z -> z.getInputStream(z.getEntry("simrelayd")).use { i -> fresh.outputStream().use { o -> i.copyTo(o) } } }
-            val installedSha = ProcessBuilder("su", "-c", "sha256sum /data/adb/modules/simrelay-host/simrelayd")
-                .start().inputStream.bufferedReader().readText().substringBefore(' ')
+            val installedSha = Root.sh("sha256sum /data/adb/modules/simrelay-host/simrelayd").out.substringBefore(' ')
             if (installedSha.isNotEmpty() && installedSha != sha256(fresh)) {
                 val m = "/data/adb/modules/simrelay-host"
-                ProcessBuilder("su", "-c", "cp '${fresh.path}' $m/simrelayd.tmp && chmod 755 $m/simrelayd.tmp && " +
-                    "mv -f $m/simrelayd.tmp $m/simrelayd && kill \$(pidof simrelayd)").start().waitFor()
+                Root.sh("cp ${Root.q(fresh.path)} $m/simrelayd.tmp && chmod 755 $m/simrelayd.tmp && " +
+                    "mv -f $m/simrelayd.tmp $m/simrelayd && kill \$(pidof simrelayd)")
                 Log.i(TAG, "simrelayd updated from this app version (restarts in 2 s)")
                 h.postDelayed({ Daemon.reconnect() }, 4000)
             }
@@ -230,11 +224,12 @@ object Updater {
                 val e = z.getEntry(name) ?: continue
                 val tmp = File(app.cacheDir, name.substringAfterLast('/'))
                 z.getInputStream(e).use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
-                val have = ProcessBuilder("su", "-c", "sha256sum '$m/$name' 2>/dev/null").start().inputStream.bufferedReader().readText().substringBefore(' ')
+                val have = Root.sh("sha256sum ${Root.q("$m/$name")} 2>/dev/null").out.substringBefore(' ')
                 if (have != sha256(tmp)) {
                     val mode = if (name == "service.sh") "755" else "644"
-                    val rc = ProcessBuilder("su", "-c", "cp '${tmp.path}' '$m/$name.tmp' && chmod $mode '$m/$name.tmp' && mv -f '$m/$name.tmp' '$m/$name'").start().waitFor()
-                    Log.i(TAG, "module $name ${if (rc == 0) "updated (next boot)" else "update FAILED"}")
+                    val dst = "$m/$name"
+                    val ok = Root.sh("cp ${Root.q(tmp.path)} ${Root.q("$dst.tmp")} && chmod $mode ${Root.q("$dst.tmp")} && mv -f ${Root.q("$dst.tmp")} ${Root.q(dst)}").ok
+                    Log.i(TAG, "module $name ${if (ok) "updated (next boot)" else "update FAILED"}")
                 }
                 tmp.delete()
             }

@@ -27,12 +27,7 @@ object RootBt {
     /** From the app (background thread): true if Android took the confirmation. */
     fun confirm(ctx: android.content.Context, mac: String): Boolean {
         if (!Regex("^[0-9A-F:]{17}$").matches(mac)) return false
-        val cmd = "CLASSPATH='${ctx.applicationInfo.sourceDir}' app_process /system/bin dev.simrelay.host.RootBt confirm $mac"
-        val out = runCatching {
-            val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
-            p.inputStream.bufferedReader().readText().also { p.waitFor() }
-        }.getOrElse { "error $it" }
-        val last = out.lines().map { it.trim() }.lastOrNull { it.isNotEmpty() }
+        val last = Root.appProcess(ctx, "dev.simrelay.host.RootBt", "confirm", mac).last
         android.util.Log.i("SimRelayHost", "pairing request from $mac: confirm -> $last")
         return last == "ok"
     }

@@ -13,7 +13,6 @@ import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Base64
 import android.util.Log
 import dev.simrelay.protocol.v1.HostWifi as HostWifiMsg
 import dev.simrelay.protocol.v1.WifiAddResult
@@ -225,8 +224,7 @@ object HostWifi {
                     else -> "wpa2"
                 }
                 if (sec != "open" && passphrase.isEmpty()) return@runCatching result(false, WifiAddResult.Problem.BAD_INPUT)
-                root("cmd wifi connect-network \"$(echo ${b64(ssid)} | base64 -d)\" $sec" +
-                    if (sec == "open") "" else " \"$(echo ${b64(passphrase)} | base64 -d)\"")
+                root("cmd wifi connect-network ${Root.q(ssid)} $sec" + if (sec == "open") "" else " ${Root.q(passphrase)}")
                 var joined = false
                 for (i in 1..40) {          // up to 20 s: association + DHCP
                     Thread.sleep(500)
@@ -289,11 +287,6 @@ object HostWifi {
 
     private fun level(rssi: Int) = when { rssi >= -55 -> 4; rssi >= -66 -> 3; rssi >= -77 -> 2; rssi >= -88 -> 1; else -> 0 }
 
-    private fun b64(s: String) = Base64.encodeToString(s.toByteArray(), Base64.NO_WRAP)
-
-    /** One root shell command; names and passwords only ever appear base64-encoded in it. */
-    private fun root(cmd: String): String = runCatching {
-        val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText(); p.waitFor(); out
-    }.getOrElse { Log.w(TAG, "root: $it"); "" }
+    /** One root shell command's output (names and passwords go in through Root.q). */
+    private fun root(cmd: String): String = Root.sh(cmd).out
 }

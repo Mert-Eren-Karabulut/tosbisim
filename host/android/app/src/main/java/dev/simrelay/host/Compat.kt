@@ -105,11 +105,7 @@ object Compat {
             .ifEmpty { prop("ro.board.platform") }
 
     /** Root works for this app (asks Magisk; the user grants it once). Call only on a user action. */
-    fun rootWorks(): Boolean = runCatching {
-        val p = ProcessBuilder("su", "-c", "id -u").redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText().trim()
-        p.waitFor(20, TimeUnit.SECONDS) && out.lines().lastOrNull() == "0"
-    }.getOrDefault(false)
+    fun rootWorks(): Boolean = Root.sh("id -u", 20_000).last == "0"
 
     fun prop(name: String): String = runCatching {
         val p = ProcessBuilder("getprop", name).start()
@@ -126,16 +122,14 @@ object Installer {
         val r = runCatching {
             val zip = File(ctx.cacheDir, "tosbisim-host-module.zip")
             ctx.assets.open(ASSET).use { i -> zip.outputStream().use { i.copyTo(it) } }
-            val p = ProcessBuilder("su", "-c", "magisk --install-module '${zip.absolutePath}'").redirectErrorStream(true).start()
-            val out = p.inputStream.bufferedReader().readText()
-            val finished = p.waitFor(120, TimeUnit.SECONDS)
-            (finished && p.exitValue() == 0) to out
+            val r = Root.sh("magisk --install-module ${Root.q(zip.absolutePath)}", 120_000)
+            r.ok to r.out
         }.getOrElse { false to "$it" }
         Log.i(TAG, "module install ${if (r.first) "ok" else "FAILED"}:\n${r.second.takeLast(800)}")
         done(r.first, r.second)
     }.start()
 
     fun reboot() {
-        runCatching { ProcessBuilder("su", "-c", "svc power reboot || reboot").start() }
+        Root.background("svc power reboot || reboot")
     }
 }

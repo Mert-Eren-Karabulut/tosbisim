@@ -97,6 +97,33 @@ class BleLink(
             BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED))
         gatt = bt.openGattServer(ctx, callback).also { it.addService(service) }
         advertise()
+        if (!radioWatch) {
+            radioWatch = true
+            ctx.registerReceiver(radioReceiver, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
+        }
+    }
+
+    /**
+     * Bluetooth switched off and on (our own link reset after a restart, the user, the stack): Android drops our GATT
+     * service and advertising with the radio, and nothing brought them back, so the host stayed deaf until the app
+     * restarted (19 Oct). Rebuild on STATE_ON; per-link state is stale after STATE_OFF.
+     */
+    @Volatile private var radioWatch = false
+    private val radioReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+            when (i.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {
+                android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF -> main.post {
+                    Log.i(TAG, "Bluetooth turning off: GATT server down")
+                    runCatching { gatt?.close() }; gatt = null
+                    readers.clear(); queues.clear(); inFlight.clear(); mtu.clear()
+                }
+                android.bluetooth.BluetoothAdapter.STATE_ON -> main.post {
+                    if (gatt != null) return@post
+                    Log.i(TAG, "Bluetooth on again: rebuilding the GATT service and advertising")
+                    start()
+                }
+            }
+        }
     }
 
     fun stop() {

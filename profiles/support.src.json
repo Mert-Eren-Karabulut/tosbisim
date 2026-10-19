@@ -50,7 +50,8 @@
       "profile": null,
       "note": "Same board as the verified S20 FE, but the last firmware checked (Android 12) lacked the in-call music path.",
       "note_tr": "Doğrulanmış S20 FE ile aynı kart, ancak incelenen son yazılımda (Android 12) arama içi müzik yolu yoktu.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Galaxy A52 4G",
@@ -66,7 +67,8 @@
       "profile": null,
       "note": "Same Qualcomm call-audio controls, in-call music PCM 23 like the S20 FE; TI amp (TAS256x DAC Mute).",
       "note_tr": "S20 FE ile aynı Qualcomm arama sesi kontrolleri, arama içi müzik PCM 23; TI amfi (TAS256x DAC Mute).",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Galaxy A72",
@@ -82,7 +84,8 @@
       "profile": null,
       "note": "Same platform and audio configs as the Galaxy A52 4G.",
       "note_tr": "Galaxy A52 4G ile aynı platform ve ses yapılandırması.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Galaxy S21 FE (Snapdragon)",
@@ -99,7 +102,8 @@
       "profile": null,
       "note": "Same controls and the same Cirrus amp mutes as the S20 FE. One UI 8 may hide OEM unlocking: buy one on One UI 7 or older.",
       "note_tr": "S20 FE ile aynı kontroller ve aynı Cirrus amfi susturmaları. One UI 8 OEM kilidi açmayı gizleyebilir: One UI 7 veya daha eskisini alın.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Galaxy A52s 5G",
@@ -115,7 +119,8 @@
       "profile": null,
       "note": "Same controls, in-call music PCM 23; TI amp like the A52.",
       "note_tr": "Aynı kontroller, arama içi müzik PCM 23; A52 ile aynı TI amfi.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Redmi Note 9 Pro / 9S",
@@ -133,7 +138,8 @@
       "profile": null,
       "note": "Same controls, in-call music PCM 23. Needs Mi Unlock.",
       "note_tr": "Aynı kontroller, arama içi müzik PCM 23. Mi Unlock gerekir.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Redmi Note 10 Pro",
@@ -150,7 +156,8 @@
       "profile": null,
       "note": "Same controls (confirmed on a Turkish ROM), in-call music PCM 27. Needs Mi Unlock.",
       "note_tr": "Aynı kontroller (Türkiye yazılımında doğrulandı), arama içi müzik PCM 27. Mi Unlock gerekir.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Redmi Note 10",
@@ -167,7 +174,8 @@
       "profile": null,
       "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.",
       "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Redmi Note 11",
@@ -185,7 +193,8 @@
       "profile": null,
       "note": "Same controls, in-call music PCM 23; Awinic amp with speaker/earpiece switches. Needs Mi Unlock.",
       "note_tr": "Aynı kontroller, arama içi müzik PCM 23; hoparlör/kulaklık anahtarlı Awinic amfi. Mi Unlock gerekir.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "POCO F3",
@@ -201,7 +210,8 @@
       "profile": null,
       "note": "Same controls, in-call music PCM 23; Cirrus amps. Needs Mi Unlock.",
       "note_tr": "Aynı kontroller, arama içi müzik PCM 23; Cirrus amfiler. Mi Unlock gerekir.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "POCO X3 Pro",
@@ -217,7 +227,8 @@
       "profile": null,
       "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.",
       "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "POCO X3 NFC",
@@ -233,7 +244,8 @@
       "profile": null,
       "note": "Same controls, in-call music PCM 27. Needs Mi Unlock.",
       "note_tr": "Aynı kontroller, arama içi müzik PCM 27. Mi Unlock gerekir.",
-      "source": "docs/desk-study/expected-list.md"
+      "source": "docs/desk-study/expected-list.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Redmi Note 8",
@@ -249,7 +261,8 @@
       "profile": null,
       "note": "Same Qualcomm call-audio controls as the S20 FE (in-call music on PCM 27). Host silence needs measuring.",
       "note_tr": "S20 FE ile aynı Qualcomm arama sesi kontrolleri (arama içi müzik PCM 27). Ana cihazın sessizliği ölçülmeli.",
-      "source": "docs/desk-study/redmi-note-8.md"
+      "source": "docs/desk-study/redmi-note-8.md",
+      "family": "qcom-legacy"
     },
     {
       "name": "Galaxy A51",
@@ -261,11 +274,12 @@
         "a51"
       ],
       "soc": "Exynos 9611",
-      "tier": "experimental",
+      "tier": "not_yet",
       "profile": null,
-      "note": "Exynos ABOX routing; call audio needs support that is still being built.",
-      "note_tr": "Exynos ABOX yönlendirmesi; arama sesi için gereken destek hâlâ geliştiriliyor.",
-      "source": "docs/desk-study/galaxy-a51.md"
+      "note": "Exynos 9611. Exynos call audio isn't supported yet; it's the next family we're working on. Basic mode (SMS, call control, hotspot) works.",
+      "note_tr": "Exynos 9611. Exynos arama sesi henüz desteklenmiyor; üzerinde çalıştığımız bir sonraki aile. Temel mod (SMS, arama yönetimi, erişim noktası) çalışır.",
+      "source": "docs/desk-study/galaxy-a51.md",
+      "family": "exynos-abox"
     },
     {
       "name": "Galaxy A31",

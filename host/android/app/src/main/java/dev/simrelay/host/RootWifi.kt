@@ -70,13 +70,7 @@ object RootWifi {
 
     /** From the app: run the helper as root; key=value map, or null with the error logged. */
     fun run(ctx: android.content.Context, vararg args: String): Map<String, String>? {
-        val apk = ctx.applicationInfo.sourceDir
-        val cmd = "CLASSPATH='$apk' app_process /system/bin dev.simrelay.host.RootWifi ${args.joinToString(" ") { "'$it'" }}"
-        val out = runCatching {
-            val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
-            val text = p.inputStream.bufferedReader().readText(); p.waitFor(); text
-        }.getOrElse { "error $it" }
-        val lines = out.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val lines = Root.appProcess(ctx, "dev.simrelay.host.RootWifi", *args).out.lines().map { it.trim() }.filter { it.isNotEmpty() }
         if (lines.lastOrNull() != "ok") { android.util.Log.w("SimRelayHost", "root wifi ${args.firstOrNull()}: ${lines.lastOrNull()}"); return null }
         // key=value lines only: stderr is merged and MIUI's system context prints stack traces there
         return lines.filter { KEY.containsMatchIn(it) }.associate { it.substringBefore('=') to it.substringAfter('=') }

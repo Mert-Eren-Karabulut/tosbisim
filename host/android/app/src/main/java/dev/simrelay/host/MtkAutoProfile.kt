@@ -63,8 +63,6 @@ object MtkAutoProfile {
 /** The sound card's PCM devices by name, from /proc/asound/pcm (needs root: apps can't read /proc/asound). Profiles
  *  name PCMs where the number varies per board (MediaTek "Capture_Mono_1", Qualcomm "MultiMedia9"). */
 object AsoundPcm {
-    fun byName(): Map<String, Int> = runCatching {
-        ProcessBuilder("su", "-c", "cat /proc/asound/pcm").start().inputStream.bufferedReader().readText()
-    }.getOrDefault("").lines().mapNotNull { Regex("^(\\d+)-(\\d+): (\\S+)").find(it)?.groupValues }
+    fun byName(): Map<String, Int> = Root.sh("cat /proc/asound/pcm", 10_000).out.lines().mapNotNull { Regex("^(\\d+)-(\\d+): (\\S+)").find(it)?.groupValues }
         .associate { it[3] to it[2].toInt() }
 }
