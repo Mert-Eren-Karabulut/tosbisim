@@ -356,8 +356,9 @@
       "name": "Samsung Exynos",
       "name_tr": "Samsung Exynos",
       "router": false,
-      "about": "Galaxy phones with Exynos chips. Not yet: Basic mode (SMS, call control, hotspot) works if the phone can be rooted.",
-      "about_tr": "Exynos işlemcili Galaxy telefonlar. Henüz değil: telefon root'lanabiliyorsa Temel mod (SMS, arama kontrolü, erişim noktası) çalışır."
+      "about": "Galaxy phones with Exynos chips. Samsung's own firmware has a digital call route (phone as call modem) on every Exynos Galaxy we checked; it needs a test phone before we turn it on. Until then: Basic mode (SMS, call control, hotspot) if the phone can be rooted.",
+      "about_tr": "Exynos işlemcili Galaxy telefonlar. Samsung'un kendi yazılımında, incelediğimiz her Exynos Galaxy'de dijital bir arama yolu (telefonu arama modemi olarak kullanma) var; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: telefon root'lanabiliyorsa Temel mod (SMS, arama kontrolü, erişim noktası).",
+      "research": "tools/corpus/research/exynos-abox.md"
     },
     "qcom-agm": {
       "name": "Qualcomm (new audio, 2022+)",
@@ -370,8 +371,17 @@
       "name": "MediaTek (older entry-level)",
       "name_tr": "MediaTek (eski giriş seviyesi)",
       "router": false,
-      "about": "Helio P22/P35/G25/G35-class chips route calls inside the vendor software. Not yet: Basic mode works.",
-      "about_tr": "Helio P22/P35/G25/G35 sınıfı işlemciler aramaları üretici yazılımı içinde yönlendirir. Henüz değil: Temel mod çalışır."
+      "about": "Helio P22/P35/G35/G37/P60/P70-class chips. Their kernels have a digital call link (MediaTek's USB call path); it needs a test phone before we turn it on. Until then: Basic mode.",
+      "about_tr": "Helio P22/P35/G35/G37/P60/P70 sınıfı işlemciler. Çekirdeklerinde dijital bir arama bağlantısı (MediaTek'in USB arama yolu) var; açmadan önce bir test telefonunda denememiz gerekiyor. O zamana kadar: Temel mod.",
+      "research": "tools/corpus/research/mtk-legacy.md"
+    },
+    "mtk-early": {
+      "name": "MediaTek (oldest)",
+      "name_tr": "MediaTek (en eski)",
+      "router": false,
+      "about": "MT6580/6737/6750/6757/6797-class chips (2015-17): no digital call path found in their firmware. Basic mode only (MT6580 phones are 3G-only).",
+      "about_tr": "MT6580/6737/6750/6757/6797 sınıfı işlemciler (2015-17): yazılımlarında dijital arama yolu bulunamadı. Yalnızca Temel mod (MT6580 telefonlar yalnızca 3G).",
+      "research": "tools/corpus/research/mtk-legacy.md"
     },
     "unisoc": {
       "name": "Unisoc",

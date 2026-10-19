@@ -56,7 +56,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 #define NAME_LEN 44            // SNDRV_CTL_ELEM_ID_NAME_MAXLEN
-#define MAX_MANAGED 16
+#define MAX_MANAGED 64           // a MediaTek profile holds ~20 links during a call; Qualcomm adds its own few
 #define MAX_VALUES 4
 #define OWN_WRITE_GRACE_NS 100000000LL   // ignore change events within 100 ms of our own write
 
@@ -171,12 +171,13 @@ static managed_t *manage(const char *name, const long long *want, int n, int wri
 
 // "SET call <control name>=<v1>[,<v2>...]": set during a call, restored after. How a non-Qualcomm platform (MediaTek,
 // Exynos) routes call audio is then data in its profile, not code.
-#define MAX_CALL_CONTROLS 16
+#define MAX_CALL_CONTROLS MAX_MANAGED
 static struct { char name[NAME_LEN]; long long v[MAX_VALUES]; int n; } g_cc[MAX_CALL_CONTROLS];
 static int g_ncc = 0;
 static int call_control_add(const char *spec) {
     const char *eq = strrchr(spec, '=');
-    if (!eq || eq == spec || g_ncc >= MAX_CALL_CONTROLS) return -1;
+    if (!eq || eq == spec) return -1;
+    if (g_ncc >= MAX_CALL_CONTROLS) { LOGE("too many call controls: '%s' dropped", spec); return -1; }
     size_t len = (size_t)(eq - spec);
     if (len >= NAME_LEN) return -1;
     memcpy(g_cc[g_ncc].name, spec, len);
@@ -309,7 +310,7 @@ static void drain_ctl_events(void) {
 
 static void reply(int fd, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void reply(int fd, const char *fmt, ...) {
-    char buf[512];
+    char buf[2048];
     va_list ap;
     va_start(ap, fmt);
     int n = vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
@@ -400,7 +401,7 @@ static void handle_line(int fd, char *line) {
     if (strcmp(cmd, "HELLO") == 0) {
         reply(fd, "OK simrelayd %s card=%d call=%d session=%d", VERSION, g_card, g_call, g_session);
     } else if (strcmp(cmd, "STATUS") == 0) {
-        char names[400] = "";
+        char names[1800] = "";
         for (int i = 0; i < g_nm; i++) {
             strncat(names, g_m[i].name, sizeof(names) - strlen(names) - 2);
             strncat(names, ";", sizeof(names) - strlen(names) - 1);

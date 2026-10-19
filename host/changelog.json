@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.11.3",
+    "code": 35,
+    "en": "Older Snapdragon phones (such as 625, 660, 710, 820, 835): the host now sets up their call audio too.\nMediaTek phones: every audio link that keeps the host silent during a call is now held (with long audio profiles, the last ones could be skipped).\nCharge limit works on more phones.\nSystem commands always have a time limit, so a stuck one can't freeze the host.",
+    "tr": "Eski Snapdragon telefonlar (625, 660, 710, 820, 835 gibi): ana cihaz artık bunların arama sesini de kuruyor.\nMediaTek telefonlar: arama sırasında ana cihazı sessiz tutan tüm ses bağlantıları artık tutuluyor (uzun ses profillerinde sondakiler atlanabiliyordu).\nŞarj sınırı daha fazla telefonda çalışıyor.\nSistem komutlarının her zaman bir süre sınırı var; takılan bir komut ana cihazı donduramaz."
+  },
+  {
     "version": "0.11.2",
     "code": 34,
     "en": "After the host restarts (an update, for example), your iPhone reconnects within seconds instead of minutes, even when it's locked.",

@@ -56,16 +56,6 @@ data class Profile(val id: String, val json: JSONObject, val source: String = "m
         val s = json.optJSONObject("silence") ?: return emptyList()
         return s.keys().asSequence().map { "SET silence $it=${s.getInt(it)}" }.toList()
     }
-
-    /** Every control name the routes use (to confirm them on the live card). */
-    fun controlNames(): List<String> {
-        val cap = json.optJSONObject("capture")
-        val inj = json.optJSONObject("inject")?.optJSONObject("route_by_session")
-        val mute = json.optJSONObject("mute")
-        val cc = json.optJSONObject("call_controls")?.keys()?.asSequence()?.toList().orEmpty()
-        return (listOf(cap?.optString("route"), cap?.optString("rec_config"), inj?.optString("1"), inj?.optString("2"),
-            mute?.optString("tx"), mute?.optString("rx")) + cc).filterNotNull().filter { it.isNotEmpty() }.distinct()
-    }
 }
 
 object Profiles {
@@ -152,11 +142,14 @@ object AutoProfile {
         val pcm = pcmIds.singleOrNull() ?: fe?.let { AsoundPcm.byName()[it] }
             ?: run { Log.i(TAG, "auto profile: incall music PCM ids $pcmIds, front end $fe not found by name"); return null }
         val inj2 = pathCtl("2") ?: anyCtl(true) ?: inj1.replace("Incall_Music ", "Incall_Music_2 ")
-        val names = listOf("MultiMedia1 Mixer VOC_REC_DL", "Voc Rec Config", inj1, inj2, "Voice Tx Device Mute", "Voice Rx Device Mute")
+        val names = listOf("MultiMedia1 Mixer VOC_REC_DL", inj1, inj2, "Voice Tx Device Mute", "Voice Rx Device Mute")
         val missing = names.filterNot(has)
         if (missing.isNotEmpty()) { Log.i(TAG, "auto profile: missing controls $missing"); return null }
+        // The record channel count (1 = mono, 2 = DL+UL): only newer msm-pcm-voice kernels have it; older ones
+        // (msm8953, sdm660, msm8996, sdm710: 14 of 34 sampled kernels, tools/corpus/out/kernels.md) always record mono.
+        val recConfig = "Voc Rec Config".takeIf(has).orEmpty()
         val json = JSONObject("""{"id":"auto/${Build.DEVICE}","router":"qcom-legacy","card":0,
-            "capture":{"pcm":0,"route":"MultiMedia1 Mixer VOC_REC_DL","rec_config":"Voc Rec Config","rate":16000,"channels":1},
+            "capture":{"pcm":0,"route":"MultiMedia1 Mixer VOC_REC_DL","rec_config":"$recConfig","rate":16000,"channels":1},
             "inject":{"pcm":$pcm,"rate":48000,"channels":2,"route_by_session":{"1":${JSONObject.quote(inj1)},"2":${JSONObject.quote(inj2)}}},
             "mute":{"tx":"Voice Tx Device Mute","rx":"Voice Rx Device Mute","vsid":4294967295,"ramp_ms":20}}""")
         Log.i(TAG, "auto profile built: inject PCM $pcm, routes '$inj1' / '$inj2'")

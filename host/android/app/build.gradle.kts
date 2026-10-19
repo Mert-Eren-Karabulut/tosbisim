@@ -38,8 +38,8 @@ android {
         applicationId = "dev.simrelay.host"
         minSdk = 30
         targetSdk = 33   // TODO(M6): 34+ needs foregroundServiceType declarations
-        versionCode = 34
-        versionName = "0.11.2"
+        versionCode = 35
+        versionName = "0.11.3"
     }
     sourceSets["main"].apply {
         // Device profiles (repo-root profiles/) ship as assets, e.g. assets/qcom/sm8250-samsung-r8q.json
@@ -49,6 +49,10 @@ android {
         // Shared host<->client protocol (repo-root protocol/, MIT)
         proto { srcDir("$rootDir/../../protocol") }
     }
+    // Not for the phone: the device index (~4 MB, served by api.tosbisim.com) and the table's hand-written source.
+    // Appended to aapt's default ignore pattern.
+    androidResources.ignoreAssetsPattern =
+        "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!devices.json:!support.src.json"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
