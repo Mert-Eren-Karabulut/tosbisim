@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.0",
+    "code": 36,
+    "en": "Setup, step by step: the screen shows one next step at a time (root, install, restart, pairing), remembers where you were, and tells apart \"restart needed\" from a module that didn't start. Fix puts back missing permissions without a restart.\nAnonymous diagnostics: setup steps, failures and call-test results are sent with the phone's model and a log with numbers, names and addresses removed, so we can tell which phones work. One switch on the setup screen turns them off.\nThe iPhone's Report a problem can include this phone's log.",
+    "tr": "Adım adım kurulum: ekran her seferinde tek bir sonraki adımı gösterir (root, kurulum, yeniden başlatma, eşleştirme), kaldığınız yeri hatırlar ve \"yeniden başlatma gerekli\" ile başlamayan bir modülü birbirinden ayırır. Düzelt, eksik izinleri yeniden başlatmadan geri verir.\nAnonim tanılama: kurulum adımları, hatalar ve arama testi sonuçları, telefonun modeli ve numaralar, adlar ve adresler çıkarılmış bir kayıtla gönderilir; böylece hangi telefonların çalıştığını görebiliriz. Kurulum ekranındaki tek bir anahtarla kapatılabilir.\niPhone'daki sorun bildirimi bu telefonun kaydını da içerebilir."
+  },
+  {
     "version": "0.11.3",
     "code": 35,
     "en": "Older Snapdragon phones (such as 625, 660, 710, 820, 835): the host now sets up their call audio too.\nYour voice no longer arrives garbled after a long ring on outgoing calls.\nThe host stays silent during its own updates and holds every audio link that keeps it silent in a call.\nMore robust: Bluetooth switched off and on, slow system commands, numbers from UK SIMs.",

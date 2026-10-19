@@ -164,6 +164,8 @@ object SmsSender {
                 val waited = android.os.SystemClock.elapsedRealtime() - (sentAt[id] ?: android.os.SystemClock.elapsedRealtime())
                 val unconfirmed = !ok && resultCode == android.telephony.SmsManager.RESULT_ERROR_GENERIC_FAILURE && waited > 60_000
                 Log.i(TAG, "SMS $id sent=$ok (result $resultCode after ${waited / 1000} s)${if (unconfirmed) ": not confirmed" else ""}")
+                if (!ok) Diag.event("sms_send_failed", org.json.JSONObject().put("what", if (unconfirmed) "unconfirmed" else "result $resultCode")
+                    .put("seconds", waited / 1000))
                 Relay.smsSendResult(SmsSendResult.newBuilder().setClientMsgId(id).setOk(ok)
                     .setError(if (ok) "" else if (unconfirmed) "unconfirmed: the network didn't confirm in time" else "result code $resultCode").build())
             }

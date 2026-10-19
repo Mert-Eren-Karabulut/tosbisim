@@ -22,6 +22,7 @@ object VoiceGate {
     /** CallKit UUID of the test call in progress (Dial.voice_test), null otherwise. */
     @Volatile var testUuid: String? = null
     @Volatile private var lastResult: VoiceTestHostResult? = null
+    @Volatile private var lastResultForReport: VoiceTestHostResult? = null   // the verdict's measurement, for [report]
 
     fun init(ctx: Context) { app = ctx.applicationContext }
 
@@ -33,6 +34,11 @@ object VoiceGate {
         }
 
     val fullVoice get() = Daemon.profile() != null && passed
+
+    /** A call test passed, but on another firmware (an update came in since): the user should test again. */
+    val passedBeforeUpdate: Boolean
+        get() = runCatching { JSONObject(prefs.getString("pass", "") ?: "") }.getOrNull()
+            ?.let { it.optString("firmware").isNotEmpty() && it.optString("firmware") != Build.FINGERPRINT } == true
 
     /** May the call with this client UUID carry audio? */
     fun allows(clientUuid: String?): Boolean = fullVoice || (Daemon.hasProfile() && clientUuid != null && clientUuid == testUuid)
@@ -69,8 +75,28 @@ object VoiceGate {
      * The user's answers. A pass needs the host's own measurements too: the friend's voice reached the capture
      * path and the iPhone's audio was played into the call. Returns null on success, else why it didn't pass.
      */
+    /**
+     * The call test's outcome as the host saw it, for "proven" phones: the iPhone's answers, the host's measurements
+     * and its own refusal reason (null = passed). Sent with the phone's exact model, codename, firmware and profile.
+     */
+    fun report(v: VoiceTestVerdict, refusal: String?) {
+        val r = lastResultForReport
+        val passed = v.passed && refusal == null
+        val d = org.json.JSONObject()
+            .put("what", if (passed) "passed" else "failed").put("reason", refusal ?: "")
+            .put("heard_caller", v.heardCaller).put("caller_heard_us", v.callerHeardUs).put("echo", v.echo)
+            .put("host_sound", v.hostSound.name.lowercase())
+            .put("measured", org.json.JSONObject().put("captured", r?.capturedFrames ?: 0).put("voiced", r?.voicedFrames ?: 0)
+                .put("sent", r?.sentFrames ?: 0).put("played", r?.playedFrames ?: 0).put("peak", r?.peak ?: 0)
+                .put("silence_controls", r?.silenceControls ?: 0))
+            .put("audio", Discovery.audio())
+        Diag.event("call_test", d, withLog = !passed, passed = passed, kind = "call_test")
+        if (passed) Diag.milestone("full_voice")
+    }
+
     fun verdict(v: VoiceTestVerdict): String? {
         val r = lastResult
+        lastResultForReport = r
         testUuid = null
         val why = when {
             !v.passed -> "not confirmed by the user"

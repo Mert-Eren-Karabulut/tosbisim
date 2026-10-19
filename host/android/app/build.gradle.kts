@@ -38,8 +38,8 @@ android {
         applicationId = "dev.simrelay.host"
         minSdk = 30
         targetSdk = 33   // TODO(M6): 34+ needs foregroundServiceType declarations
-        versionCode = 35
-        versionName = "0.11.3"
+        versionCode = 36
+        versionName = "0.12.0"
     }
     sourceSets["main"].apply {
         // Device profiles (repo-root profiles/) ship as assets, e.g. assets/qcom/sm8250-samsung-r8q.json
@@ -70,4 +70,5 @@ protobuf {
 dependencies {
     implementation("com.google.protobuf:protobuf-javalite:4.31.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")   // remote mode WebSocket (Apache-2.0)
+    testImplementation("junit:junit:4.13.2")
 }

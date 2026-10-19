@@ -46,6 +46,8 @@ message Envelope {
     WifiAdd wifi_add = 58;              // client -> host, Bluetooth only: save a network and try it
     WifiAddResult wifi_add_result = 59; // host -> client (reply)
     WifiForget wifi_forget = 60;        // client -> host, Bluetooth only
+    DiagnosticsRequest diagnostics_request = 61; // client -> host: the host's side of a problem report
+    Diagnostics diagnostics = 62;                // host -> client (reply)
   }
 }
 
@@ -384,3 +386,16 @@ message Uplink {
   enum Kind { NONE = 0; WIFI = 1; MOBILE = 2; OTHER = 3; }
 }
 
+// Problem reports (anonymous): the host's recent log, scrubbed on the host before it leaves (no phone numbers,
+// hardware addresses, network names, ids or message text), plus the facts that identify the phone model and setup.
+message DiagnosticsRequest {
+  uint32 max_bytes = 1;          // 0 = the host's default (16 KB)
+}
+
+// Sent in parts (the client's frames are at most 4 KB): part 1..parts, facts_json in part 1 only.
+message Diagnostics {
+  string log = 1;                // a slice of the host's recent log, scrubbed
+  string facts_json = 2;         // JSON: model, device, firmware, Android, tier, profile, daemon state, Magisk
+  uint32 part = 3;
+  uint32 parts = 4;
+}

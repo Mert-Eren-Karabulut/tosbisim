@@ -26,7 +26,17 @@ object Compat {
     fun isHostInstalled(ctx: Context): Boolean =
         ctx.checkSelfPermission(Manifest.permission.MODIFY_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
 
+    @Volatile private var cached: Triple<Long, String, Verdict>? = null
+
+    /** This phone's support verdict; recomputed only when the live table or the language changes (it is ~300 KB). */
     fun verdict(ctx: Context): Verdict {
+        val key = File(ctx.filesDir, "support.json").lastModified()
+        val lang = java.util.Locale.getDefault().language
+        cached?.let { (k, l, v) -> if (k == key && l == lang) return v }
+        return compute(ctx).also { cached = Triple(key, lang, it) }
+    }
+
+    private fun compute(ctx: Context): Verdict {
         // The live table from api.tosbisim.com when we have one (Api.refreshSupportTable), else the bundled copy.
         val table = runCatching {
             val live = File(ctx.filesDir, "support.json")
@@ -56,13 +66,21 @@ object Compat {
             fun strings(p: JSONObject, k: String) = p.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
             fun tierOf(p: JSONObject) = runCatching { Tier.valueOf(p.getString("tier").uppercase()) }.getOrDefault(Tier.UNKNOWN)
             // The exact model number wins over a shared codename (the S20 FE 5G is also "r8q").
+            // An unsupported row without its own note (corpus rows): the maker rule's reason, so people learn why.
+            fun note(p: JSONObject): String = local(p, "note").ifEmpty {
+                if (tierOf(p) != Tier.UNSUPPORTED) "" else table.optJSONArray("rules")?.let { rules ->
+                    (0 until rules.length()).map { rules.getJSONObject(it) }.firstOrNull { r ->
+                        r.optJSONArray("manufacturers")?.let { a -> (0 until a.length()).any { a.getString(it) == maker } } == true
+                    }?.let { local(it, "reason") }
+                }.orEmpty()
+            }
             list.firstOrNull { p -> strings(p, "models").any { it.equals(Build.MODEL, ignoreCase = true) } }?.let { p ->
-                return Verdict(tierOf(p), p.optString("name", fallbackName), local(p, "note"))
+                return Verdict(tierOf(p), p.optString("name", fallbackName), note(p))
             }
             // Same codename, other model number (another region of the same phone): at most "expected".
             list.firstOrNull { p -> Build.DEVICE in strings(p, "devices") }?.let { p ->
                 val t = tierOf(p)
-                return Verdict(if (t == Tier.VERIFIED) Tier.EXPECTED else t, "${p.optString("name")} (${Build.MODEL})", local(p, "note"))
+                return Verdict(if (t == Tier.VERIFIED) Tier.EXPECTED else t, "${p.optString("name")} (${Build.MODEL})", note(p))
             }
         }
         // Not listed: the chip platform's call-audio family from the AndroidDumps corpus (support.json "platforms").
@@ -118,7 +136,16 @@ object Installer {
     private const val TAG = "SimRelayHost"
     private const val ASSET = "module/tosbisim-host-module.zip"
 
-    fun install(ctx: Context, done: (ok: Boolean, log: String) -> Unit) = Thread {
+    private val running = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Installs the embedded module; false (and no [done]) while another install is still running. */
+    fun install(ctx: Context, done: (ok: Boolean, log: String) -> Unit): Boolean {
+        if (!running.compareAndSet(false, true)) return false
+        Thread { try { run(ctx, done) } finally { running.set(false) } }.start()
+        return true
+    }
+
+    private fun run(ctx: Context, done: (ok: Boolean, log: String) -> Unit) {
         val r = runCatching {
             val zip = File(ctx.cacheDir, "tosbisim-host-module.zip")
             ctx.assets.open(ASSET).use { i -> zip.outputStream().use { i.copyTo(it) } }
@@ -126,8 +153,10 @@ object Installer {
             r.ok to r.out
         }.getOrElse { false to "$it" }
         Log.i(TAG, "module install ${if (r.first) "ok" else "FAILED"}:\n${r.second.takeLast(800)}")
+        if (r.first) Diag.milestone("module_installed")
+        else Diag.event("module_install_failed", org.json.JSONObject().put("output", Scrub.text(r.second.takeLast(3000))))
         done(r.first, r.second)
-    }.start()
+    }
 
     fun reboot() {
         Root.background("svc power reboot || reboot")

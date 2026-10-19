@@ -33,6 +33,8 @@ object Daemon {
     @Volatile private var chargeLimit = 0          // re-sent on reconnect (sysfs resets on reboot only, but cheap)
 
     @Volatile private var started = false
+    /** [start] ran (the host service is up): only then does a failed probe mean the daemon is down. */
+    fun isStarted() = started
 
     fun start(ctx: Context) {
         val p = Profiles.forThisDevice(ctx)
@@ -45,6 +47,7 @@ object Daemon {
     /** A call is ACTIVE on this voice session (1 or 2). Idempotent. */
     fun callActive(session: Int) = exec.execute {
         if (profile == null || activeSession == session) return@execute   // Basic mode: no audio routes to apply
+        if (activeSession == 0) callSince = android.os.SystemClock.elapsedRealtime()
         activeSession = session
         request("CALL_START $session")
     }
@@ -53,7 +56,23 @@ object Daemon {
     fun callIdle() = exec.execute {
         if (activeSession == 0) return@execute
         activeSession = 0
+        checkCallAudio(request("AUDIO?"), (android.os.SystemClock.elapsedRealtime() - callSince) / 1000)
         request("CALL_END")
+    }
+
+    @Volatile private var callSince = 0L
+
+    /**
+     * A full-voice call whose audio didn't flow one way (nothing captured from the caller, or nothing of the iPhone's
+     * played into the call): the failure that matters most on phones we never measured ourselves.
+     */
+    private fun checkCallAudio(reply: String?, seconds: Long) {
+        if (reply == null || seconds < 10 || !VoiceGate.fullVoice) return
+        fun num(k: String) = Regex("\\b$k=(-?\\d+)").find(reply)?.groupValues?.get(1)?.toLongOrNull() ?: 0
+        val cap = num("cap"); val played = num("played")
+        if (cap > 0 && played > 0) return
+        Diag.event("call_audio_failed", org.json.JSONObject().put("what", if (cap == 0L) "no capture" else "nothing played")
+            .put("seconds", seconds).put("daemon", reply))
     }
 
     fun status() = exec.execute { request("STATUS") }
@@ -85,6 +104,21 @@ object Daemon {
         main.post { done(ok) }
     }
 
+    private val probing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Is the daemon there? One HELLO, no retries, at most one in flight: the setup screen asks every 2 s and must not
+     * queue probes (with their retry sleeps) ahead of CALL_START and box commands while the daemon is down.
+     */
+    fun probe(done: (String?) -> Unit) {
+        if (!probing.compareAndSet(false, true)) return
+        exec.execute {
+            val r = runCatching { if (connect()) send("HELLO") else null }.getOrNull()
+            probing.set(false)
+            main.post { done(r) }
+        }
+    }
+
     /** One request whose reply the caller needs (e.g. IFSTATS); [done] runs on main, never on the daemon thread. */
     fun query(line: String, done: (String?) -> Unit) = exec.execute { val r = request(line); main.post { done(r) } }
 
@@ -105,6 +139,9 @@ object Daemon {
                 autoTried = true
                 profile = AutoProfile.build { n -> send("HAS $n")?.startsWith("OK") == true }
                 Log.i(TAG, "profile: ${profile?.let { "${it.id} (auto)" } ?: "none, Basic mode"}")
+                // What the auto profile found (or why not) is the one thing we can't learn from firmware dumps
+                Diag.event("auto_profile", org.json.JSONObject().put("what", if (profile != null) "built" else "none")
+                    .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("audio", Discovery.audio()))
             }
             profile?.daemonSetLines()?.forEach { send(it) }
             if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key
@@ -140,6 +177,7 @@ object Daemon {
             Thread.sleep(500L * (attempt + 1))
         }
         Log.e(TAG, "daemon unreachable, dropped: $line")
+        Diag.event("daemon_unreachable", org.json.JSONObject().put("what", line.substringBefore(' ')))
         return null
     }
 

@@ -59,7 +59,10 @@ object Api {
             }
             when (c.responseCode) {
                 200 -> {
-                    f.writeText(c.inputStream.bufferedReader().readText())
+                    // Whole file or nothing: a reader (the setup screen) must never see half a table
+                    val tmp = File(ctx.filesDir, "support.json.tmp")
+                    tmp.writeText(c.inputStream.bufferedReader().readText())
+                    if (!tmp.renameTo(f)) { tmp.delete(); error("rename failed") }
                     ctx.getSharedPreferences("api", Context.MODE_PRIVATE).edit().putString("support_etag", c.getHeaderField("ETag")).apply()
                     Log.i(TAG, "support table updated (${c.getHeaderField("ETag")})")
                 }

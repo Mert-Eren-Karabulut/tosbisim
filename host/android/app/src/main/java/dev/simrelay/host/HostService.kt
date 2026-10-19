@@ -29,6 +29,8 @@ class HostService : Service() {
         Log.i(TAG, "host service up; silence: zen_mode=${Settings.Global.getInt(contentResolver, "zen_mode", -1)} " +
                 "(2 = total silence)")
         silenceStreams()
+        Diag.milestone("host_running")
+        Onboarding.hostRunning(this)
         Daemon.start(this)
         Relay.start(this)
     }
@@ -107,6 +109,9 @@ class HostService : Service() {
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.notif_text))
             .setSmallIcon(android.R.drawable.stat_sys_phone_call)
+            // Tapping it opens setup and status (after the module's restart this is how people find the next step)
+            .setContentIntent(android.app.PendingIntent.getActivity(this, 0, Intent(this, SetupActivity::class.java),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
             .build()
     }
 }

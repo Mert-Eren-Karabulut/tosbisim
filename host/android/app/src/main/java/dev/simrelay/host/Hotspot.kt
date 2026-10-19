@@ -338,6 +338,7 @@ object Hotspot {
                         startingSince = 0
                         val upAnyway = isOn(ctx)
                         Log.w(TAG, "hotspot start failed: error ${args?.get(0)}${if (upAnyway) " (but it is on: OK)" else ""}")
+                        if (!upAnyway) Diag.event("hotspot_failed", org.json.JSONObject().put("what", "error ${args?.get(0)}"))
                         done(upAnyway, if (upAnyway) "started" else "error ${args?.get(0)}")
                     }
                 }

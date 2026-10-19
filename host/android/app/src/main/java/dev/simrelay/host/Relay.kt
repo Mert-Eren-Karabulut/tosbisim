@@ -139,6 +139,7 @@ object Relay {
     /** Remote link up/down: the client's Host tab shows it. */
     fun remoteChanged() = main.post(pushStatus)
     fun pairingOpen(): Boolean = SystemClock.elapsedRealtime() < pairingUntil
+    fun pairingSecondsLeft(): Int = ((pairingUntil - SystemClock.elapsedRealtime()) / 1000).coerceAtLeast(0).toInt()
 
     fun openPairing(ms: Long = PAIRING_WINDOW_MS) {
         pairingUntil = SystemClock.elapsedRealtime() + ms
@@ -251,9 +252,12 @@ object Relay {
                 main.post { send(d, Envelope.newBuilder().setVoiceTestHostResult(r), env.seq) }
             }
             Envelope.BodyCase.VOICE_TEST_VERDICT -> {
-                VoiceGate.verdict(env.voiceTestVerdict)?.let { error(d, env.seq, Error.Code.BAD_REQUEST, "call test: $it") }
+                val refusal = VoiceGate.verdict(env.voiceTestVerdict)
+                refusal?.let { error(d, env.seq, Error.Code.BAD_REQUEST, "call test: $it") }
+                VoiceGate.report(env.voiceTestVerdict, refusal)
                 main.post(pushStatus)
             }
+            Envelope.BodyCase.DIAGNOSTICS_REQUEST -> sendDiagnostics(d, env.diagnosticsRequest.maxBytes)
             Envelope.BodyCase.SET_HOTSPOT -> {
                 // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
                 if (env.setHotspot.on && !bleNear() && CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED })
@@ -332,6 +336,7 @@ object Relay {
         trusted.add(d.id)
         if (d is Peer.Ble) HostWifi.evaluate("Bluetooth up")
         app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("client_model", env.hello.deviceModel).apply()
+        Diag.milestone("paired", org.json.JSONObject().put("client", env.hello.deviceModel.substringBefore(' ')))
         Log.i(TAG, "Hello from ${env.hello.deviceModel} app ${env.hello.appVersion} (protocol ${env.hello.protocolVersion}) via ${if (d is Peer.Ble) "Bluetooth" else "internet"}")
         send(d, Envelope.newBuilder().setHello(Hello.newBuilder()
             .setProtocolVersion(PROTOCOL_VERSION).setAppVersion(BuildConfigInfo.version(app))
@@ -419,11 +424,25 @@ object Relay {
         }, 5000)
     }
 
+    /** The host's half of a problem report from the iPhone: scrubbed log + facts, in parts (frames are <= 4 KB). */
+    private fun sendDiagnostics(d: Peer, maxBytes: Int) = Thread {
+        val log = Diag.recentLog(if (maxBytes in 1..32_000) maxBytes else 16_000)
+        val facts = Diag.facts("event").apply { remove("install_id"); remove("kind") }.toString()
+        val parts = utf8Chunks(log, 2_800).ifEmpty { listOf("") }
+        parts.forEachIndexed { i, chunk ->
+            val m = dev.simrelay.protocol.v1.Diagnostics.newBuilder().setLog(chunk).setPart(i + 1).setParts(parts.size)
+            if (i == 0) m.setFactsJson(facts)
+            main.post { send(d, Envelope.newBuilder().setDiagnostics(m)) }
+        }
+        Log.i(TAG, "diagnostics sent to the client: ${log.length} chars in ${parts.size} parts")
+    }.start()
+
     private val keepAlive = object : Runnable {
         override fun run() {
             askForHello()
             HostWifi.evaluate("keep-alive")
             guardSmsRole()
+            Diag.retry()                                     // reports queued while offline
             broadcast(Envelope.newBuilder().setKeepAlive(KeepAlive.newBuilder().setN(++kaN)))
             main.postDelayed(this, KEEPALIVE_MS)
         }
