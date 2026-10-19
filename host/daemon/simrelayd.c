@@ -120,6 +120,57 @@ static int ctl_read_t(unsigned numid, long long *out, unsigned count, int enumer
     return 0;
 }
 
+// ------------------------------------------------------------------ hardware inventory
+// Every mixer control's description (ELEM_LIST + ELEM_INFO, enum item names): never a value read or write, so it can't
+// disturb the hardware. What the phone's own sound card offers is what lets a family be built and proven from users'
+// phones instead of donor phones (docs/10-proving-voice-paths.md). One line per control:
+//   numid<TAB>name<TAB>type<TAB>count<TAB>min..max | enum item|item|...
+#define INVENTORY_FILE "/data/adb/tosbisim/inventory.txt"
+static int inventory(const char *path) {
+    if (g_ctl < 0) return -1;
+    struct snd_ctl_elem_list list;
+    memset(&list, 0, sizeof(list));
+    if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_LIST, &list) < 0) return -1;
+    unsigned total = list.count;
+    struct snd_ctl_elem_id *ids = calloc(total ? total : 1, sizeof(*ids));
+    if (!ids) return -1;
+    list.space = total;
+    list.pids = ids;
+    if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_LIST, &list) < 0) { free(ids); return -1; }
+    char tmp[128];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "we");
+    if (!f) { free(ids); return -1; }
+    static const char *types[] = { "none", "bool", "int", "enum", "bytes", "iec958", "int64" };
+    int n = 0;
+    for (unsigned i = 0; i < list.used; i++) {
+        struct snd_ctl_elem_info in;
+        memset(&in, 0, sizeof(in));
+        in.id.numid = ids[i].numid;
+        if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &in) < 0) continue;
+        int t = (int)in.type;
+        fprintf(f, "%u\t%s\t%s\t%u\t", in.id.numid, (const char *)in.id.name, t >= 0 && t <= 6 ? types[t] : "?", in.count);
+        if (in.type == SNDRV_CTL_ELEM_TYPE_INTEGER) fprintf(f, "%ld..%ld", in.value.integer.min, in.value.integer.max);
+        else if (in.type == SNDRV_CTL_ELEM_TYPE_INTEGER64) fprintf(f, "%lld..%lld", (long long)in.value.integer64.min, (long long)in.value.integer64.max);
+        else if (in.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED) {
+            unsigned items = in.value.enumerated.items;
+            for (unsigned k = 0; k < items && k < 64; k++) {
+                struct snd_ctl_elem_info e = in;
+                e.value.enumerated.item = k;
+                if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_INFO, &e) == 0) fprintf(f, "%s%s", k ? "|" : "", e.value.enumerated.name);
+            }
+            if (items > 64) fprintf(f, "|...(%u)", items);
+        }
+        fputc('\n', f);
+        n++;
+    }
+    fclose(f);
+    free(ids);
+    if (rename(tmp, path) != 0) return -1;
+    LOGI("inventory: %d controls -> %s", n, path);
+    return n;
+}
+
 // ------------------------------------------------------------------ write safety
 // A value is written only if the control says it can hold it. Production kernels don't range-check mixer writes and
 // vendor put() handlers index tables with the raw value: a profile matched by family (or built automatically) naming a
@@ -558,6 +609,9 @@ static void handle_line(int fd, char *line) {
     } else if (strcmp(cmd, "CALL_END") == 0) {
         restore_all("CALL_END");
         reply(fd, "OK");
+    } else if (strcmp(cmd, "INVENTORY") == 0) {         // read-only: every control's description, to a root-only file
+        int n = inventory(INVENTORY_FILE);
+        if (n < 0) reply(fd, "ERR no mixer"); else reply(fd, "OK %d controls in " INVENTORY_FILE, n);
     } else if (strcmp(cmd, "HAS") == 0) {               // does this mixer control exist? (auto profiles)
         char *name = strtok(NULL, "");
         struct snd_ctl_elem_info info;

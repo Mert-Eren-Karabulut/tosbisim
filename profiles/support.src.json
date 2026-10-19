@@ -650,6 +650,86 @@
       "note_tr": "İşlemci üreticinin teknik özelliklerinden (Google Tensor G3): Google Tensor (Pixel 6 ve sonrası) ailesi, arama sesi henüz desteklenmiyor. Telefon root'lanabiliyorsa Temel mod çalışır.",
       "source": "spec: https://wiki.lineageos.org/devices/akita/",
       "family": "google-tensor"
+    },
+    {
+      "name": "Xperia 10 IV",
+      "brand": "Sony",
+      "models": [
+        "XQ-CC54",
+        "XQ-CC72",
+        "XQ-CC44"
+      ],
+      "devices": [],
+      "soc": "Qualcomm Snapdragon 695 (SM6375)",
+      "family": "qcom-legacy",
+      "tier": "experimental",
+      "source": "spec: https://www.gsmarena.com/sony_xperia_10_iv-11522.php (XQ-CC44: https://en.wikipedia.org/wiki/Sony_Xperia_10_IV)",
+      "profile": null,
+      "note": "Chip from the maker's specs (Qualcomm Snapdragon 695 (SM6375)): our Qualcomm family. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 695 (SM6375)): Qualcomm ailemiz. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde."
+    },
+    {
+      "name": "Xperia 10 V",
+      "brand": "Sony",
+      "models": [
+        "XQ-DC54",
+        "XQ-DC72"
+      ],
+      "devices": [],
+      "soc": "Qualcomm Snapdragon 695 (SM6375)",
+      "family": "qcom-legacy",
+      "tier": "experimental",
+      "source": "spec: https://m.gsmarena.com/sony_xperia_10_v-12264.php",
+      "profile": null,
+      "note": "Chip from the maker's specs (Qualcomm Snapdragon 695 (SM6375)): our Qualcomm family. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 695 (SM6375)): Qualcomm ailemiz. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde."
+    },
+    {
+      "name": "Xperia 5 III",
+      "brand": "Sony",
+      "models": [
+        "XQ-BQ52",
+        "XQ-BQ42",
+        "XQ-BQ72"
+      ],
+      "devices": [],
+      "soc": "Qualcomm Snapdragon 888 (SM8350)",
+      "family": "qcom-legacy",
+      "tier": "experimental",
+      "source": "spec: https://www.gsmarena.com/sony_xperia_5_iii-10851.php (XQ-BQ42: https://en.wikipedia.org/wiki/Sony_Xperia_5_III)",
+      "profile": null,
+      "note": "Chip from the maker's specs (Qualcomm Snapdragon 888 (SM8350)): our Qualcomm family. Sony unlocks the bootloader of global models (XQ-…) through its developer site; Japanese carrier models (SO-/SOG/A…SO) can't be unlocked. No firmware of this model in our archive yet, so the call test decides.",
+      "note_tr": "İşlemci üreticinin teknik özelliklerinden (Qualcomm Snapdragon 888 (SM8350)): Qualcomm ailemiz. Sony, küresel modellerin (XQ-…) önyükleyici kilidini geliştirici sitesinden açar; Japon operatör modellerinin (SO-/SOG/A…SO) kilidi açılamaz. Arşivimizde bu modelin yazılımı henüz yok, karar arama testinde."
+    },
+    {
+      "name": "S19 Max Pro S",
+      "brand": "Reeder",
+      "models": [
+        "S19 Max Pro S"
+      ],
+      "devices": [],
+      "soc": "Unisoc T606",
+      "family": "unisoc",
+      "tier": "not_yet",
+      "profile": null,
+      "note": "Chip from the seller's specs (Unisoc T606): texts, call control and the hotspot work (Basic mode); call audio for Unisoc phones isn't built yet.",
+      "note_tr": "İşlemci satıcının teknik özelliklerinden (Unisoc T606): mesajlar, arama kontrolü ve erişim noktası çalışır (Temel mod); Unisoc telefonlar için arama sesi henüz hazır değil.",
+      "source": "spec: https://www.turkcell.com.tr/pasaj/cep-telefonu/android-telefonlar/reeder-s19-max-pro-s-128-gb"
+    },
+    {
+      "name": "P smart 2021",
+      "brand": "Huawei",
+      "models": [
+        "P smart 2021"
+      ],
+      "devices": [],
+      "soc": "HiSilicon Kirin 710A",
+      "family": null,
+      "tier": "unsupported",
+      "profile": null,
+      "note": "Huawei doesn't unlock bootloaders, so this phone can't be rooted to become a host (it also launched on Android 10 without Google services).",
+      "note_tr": "Huawei önyükleyici kilidini açmıyor, bu yüzden bu telefon ana cihaz olmak için root'lanamaz (ayrıca Google servisleri olmadan Android 10 ile çıktı).",
+      "source": "spec: https://m.gsmarena.com/huawei_p_smart_2021-10475.php"
     }
   ],
   "rules": [

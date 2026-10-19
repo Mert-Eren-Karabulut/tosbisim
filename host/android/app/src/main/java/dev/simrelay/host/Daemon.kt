@@ -150,6 +150,8 @@ object Daemon {
             profile?.daemonSetLines()?.forEach { send(it) }
             if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key
             if (chargeLimit > 0) send("CHARGE $chargeLimit")
+            // Once per firmware, never during a call: the sound card as the kernel describes it (read-only)
+            if (activeSession == 0 && Inventory.due()) send("INVENTORY")?.takeIf { it.startsWith("OK") }?.let { Inventory.send(it) }
             if (activeSession != 0) send("CALL_START $activeSession")
             true
         } catch (e: Exception) {

@@ -147,7 +147,7 @@
     <string name="error_body">Ana cihaz çalışmaya devam ediyor. TosbiSim\'i kapatıp yeniden açın; sorun tekrar ederse düzeltebilmemiz için aşağıdan bir rapor gönderin.</string>
     <string name="diag_title">TosbiSim\'i geliştirmemize yardım edin</string>
     <string name="diag_switch">Anonim tanılama verisi gönder</string>
-    <string name="diag_note">Telefon modeli, yazılımı, kurulumun ve aramaların nasıl gittiği; bir şey başarısız olursa telefon numaraları, adresler ve adlar çıkarılmış kısa bir kayıt. Mesaj, kişi veya kimlik yok. Hangi telefonları kanıtlanmış sayabileceğimizi bu belirler.</string>
+    <string name="diag_note">Telefon modeli, yazılımı, ses çipinin ses ayarlarının adları ve aralıkları (bir defa), kurulumun ve aramaların nasıl gittiği; bir şey başarısız olursa telefon numaraları, adresler ve adlar çıkarılmış kısa bir kayıt. Mesaj, kişi veya kimlik yok. Hangi telefonları kanıtlanmış sayabileceğimizi bu belirler.</string>
     <string name="btn_send_report">Şimdi rapor gönder</string>
     <string name="btn_sending">Gönderiliyor…</string>
     <string name="report_sent">Rapor gönderildi. Teşekkürler!</string>

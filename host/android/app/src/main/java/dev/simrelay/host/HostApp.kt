@@ -8,6 +8,7 @@ class HostApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Diag.init(this)
+        Inventory.init(this)
         Onboarding.init(this)
     }
 }

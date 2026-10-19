@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.4",
+    "code": 40,
+    "en": "Helps more phones get full voice: with diagnostics on, the host sends a one-time description of its sound chip (the names and ranges of its audio settings; nothing is changed, and nothing about you or your calls is included), so call audio can be made to work on phones we have never had in hand.",
+    "tr": "Daha fazla telefonun tam sese kavuşmasına yardım eder: tanılama açıksa ana cihaz, ses çipinin bir defalık tanımını gönderir (ses ayarlarının adları ve aralıkları; hiçbir şey değiştirilmez, sizinle ya da aramalarınızla ilgili hiçbir bilgi yoktur). Böylece elimize hiç geçmemiş telefonlarda da arama sesi çalıştırılabilir."
+  },
+  {
     "version": "0.12.3",
     "code": 39,
     "en": "Newer phones: the host's background service now also runs on Android 15+ phones whose kernel uses 16 KB memory pages (before, it couldn't start there, so call audio, box mode and the charge limit were missing).\nBox mode's app blocking no longer holds up the host while Android's network settings are busy.",

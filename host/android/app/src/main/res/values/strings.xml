@@ -154,7 +154,7 @@
     <!-- diagnostics -->
     <string name="diag_title">Help improve TosbiSim</string>
     <string name="diag_switch">Send anonymous diagnostics</string>
-    <string name="diag_note">Phone model, firmware and how setup and calls go, and when something fails a short log with phone numbers, addresses and names removed. No messages, contacts or IDs. It decides which phones we can call proven.</string>
+    <string name="diag_note">Phone model, firmware, the names and ranges of its sound chip\'s audio settings (once), how setup and calls go, and when something fails a short log with phone numbers, addresses and names removed. No messages, contacts or IDs. It decides which phones we can call proven.</string>
     <string name="btn_send_report">Send a report now</string>
     <string name="btn_sending">Sending…</string>
     <string name="report_sent">Report sent. Thank you!</string>
