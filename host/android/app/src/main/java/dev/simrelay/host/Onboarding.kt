@@ -177,6 +177,27 @@ object Onboarding {
      * Put back what the module sets at boot, now, as root (instead of "restart the phone"): permissions, battery
      * exemption, SMS role, total silence, Bluetooth on.
      */
+    @Volatile private var lastHeal = 0L
+
+    /**
+     * A host repairs itself instead of waiting for someone to tap Fix now on a screen nobody looks at: an app update
+     * (pm install, as the self-updater does) drops the battery exemption on MIUI until the next restart (Redmi, 20 Oct
+     * 2026), and Android can take a permission or the SMS role away. At most every 10 minutes, only when something is
+     * missing, never while the phone is being given back.
+     */
+    fun selfHeal(ctx: Context) {
+        if (Retire.running || !Compat.isHostInstalled(ctx)) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastHeal != 0L && now - lastHeal < 10 * 60_000L) return
+        val gaps = listOfNotNull(
+            "permissions".takeIf { missing(ctx, RUNTIME).isNotEmpty() }, "battery".takeIf { !batteryExempt(ctx) },
+            "silence".takeIf { !silent(ctx) }, "sms role".takeIf { !smsRole(ctx) })
+        if (gaps.isEmpty()) return
+        lastHeal = now
+        Log.w(TAG, "self-repair: ${gaps.joinToString()}")
+        fixAll(ctx) {}
+    }
+
     fun fixAll(ctx: Context, done: () -> Unit) {
         if (fixing) return
         fixing = true

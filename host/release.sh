@@ -4,7 +4,10 @@
 # hosts download for over-the-air self-updates (--publish). Needs the release key in ~/.tosbisim.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PUBLISH=0; [ "${1:-}" = "--publish" ] && PUBLISH=1
+# --publish: hosts get it over the air (api.tosbisim.com). --github: a GitHub release on the public repo with the Magisk
+# zip, the file users download (tosbisim.com links to releases/latest/download/TosbiSim-Host-Magisk.zip).
+PUBLISH=0; GITHUB=0
+for a in "$@"; do case "$a" in --publish) PUBLISH=1;; --github) GITHUB=1;; *) echo "unknown option $a"; exit 2;; esac; done
 VER=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' "$HERE/android/app/build.gradle.kts")
 CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' "$HERE/android/app/build.gradle.kts")
 # Every release ships with notes in English and Turkish (host/changelog.json): no notes, no release.
@@ -49,4 +52,25 @@ if [ "$PUBLISH" = 1 ]; then
   SRV=root@82.112.242.53; SITE=/home/tosbisim-api/htdocs/api.tosbisim.com
   scp -q "$OUT" "$NOTES" "$SRV:/tmp/"
   ssh "$SRV" "chown tosbisim-api /tmp/$(basename "$OUT") /tmp/$(basename "$NOTES") && cd $SITE && sudo -u tosbisim-api php8.4 artisan tosbisim:release host '$VER' $CODE /tmp/$(basename "$NOTES") --apk=/tmp/$(basename "$OUT") && rm -f /tmp/$(basename "$OUT") /tmp/$(basename "$NOTES")"
+fi
+
+# --github: the public release users download. The asset name never changes, so "latest" always serves the newest zip.
+if [ "$GITHUB" = 1 ]; then
+  REPO=Mert-Eren-Karabulut/tosbisim; TAG="host-v$VER"
+  gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 && { echo "GitHub release $TAG exists already"; exit 1; }
+  STAGE="$(mktemp -d)"
+  cp "$ZIP" "$STAGE/TosbiSim-Host-Magisk.zip"
+  (cd "$STAGE" && shasum -a 256 TosbiSim-Host-Magisk.zip > TosbiSim-Host-Magisk.zip.sha256)
+  python3 - "$NOTES" "$STAGE/notes.md" <<'PYN'
+import json, sys
+n = json.load(open(sys.argv[1], encoding="utf-8"))
+open(sys.argv[2], "w", encoding="utf-8").write(
+    n["en"] + "\n\n**Install:** in Magisk, Modules → Install from storage → TosbiSim-Host-Magisk.zip → Reboot. "
+    "Guide: https://tosbisim.com\n\n---\n\n" + n["tr"] +
+    "\n\n**Kurulum:** Magisk → Modüller → Depolamadan yükle → TosbiSim-Host-Magisk.zip → Yeniden başlat. Rehber: https://tosbisim.com\n")
+PYN
+  gh release create "$TAG" --repo "$REPO" --title "TosbiSim Host $VER" --notes-file "$STAGE/notes.md" --latest \
+    "$STAGE/TosbiSim-Host-Magisk.zip" "$STAGE/TosbiSim-Host-Magisk.zip.sha256"
+  rm -rf "$STAGE"
+  echo "github: https://github.com/$REPO/releases/tag/$TAG"
 fi

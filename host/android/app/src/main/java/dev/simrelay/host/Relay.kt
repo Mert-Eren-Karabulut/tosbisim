@@ -546,6 +546,7 @@ object Relay {
             HostWifi.evaluate("keep-alive")
             guardSmsRole()
             guardDialerRole()
+            Onboarding.selfHeal(app)
             Diag.retry()                                     // reports queued while offline
             if (Box.blocksPowerKey) Daemon.powerKey(true)    // the daemon's dead-man: an unconfirmed block lapses in 15 min
             broadcast(Envelope.newBuilder().setKeepAlive(KeepAlive.newBuilder().setN(++kaN)))

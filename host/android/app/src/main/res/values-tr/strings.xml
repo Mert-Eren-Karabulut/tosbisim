@@ -116,7 +116,7 @@
     <string name="service_ok">Çalışıyor (%s)</string>
     <string name="service_down">Çalışmıyor</string>
     <string name="c_permissions">İzinler ve roller</string>
-    <string name="perm_ok">Telefon, SMS, Bluetooth; varsayılan SMS uygulaması; asla uyutulmaz; tam sessizlik</string>
+    <string name="perm_ok">Telefon, SMS, Bluetooth; varsayılan telefon ve SMS uygulaması; asla uyutulmaz; tam sessizlik</string>
     <string name="c_bluetooth">Bluetooth</string>
     <string name="ble_ok">Açık; iPhone\'unuz bu telefonu bulabilir</string>
     <string name="ble_off">Kapalı</string>

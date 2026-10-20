@@ -23,9 +23,9 @@ import java.util.concurrent.ConcurrentHashMap
  * Bridges Telecom calls (seen by CallMonitor, our non-UI InCallService) to protocol CallEvents, and
  * carries out the client's CallAction / Dial. Also drives the audio daemon: only an ACTIVE (or DIALING) call has
  * its routes and mutes applied, only with full voice on or for the guided call test (VoiceGate), and only for a call
- * the iPhone owns: one it dialled or answered. A call answered on the host itself (someone holding it, box mode off)
- * stays an ordinary phone call: relaying it would cut the host's mic out and feed the caller silence (20 Oct 2026, a
- * host restarted by its keep-alive mid-call did exactly that).
+ * the iPhone owns: one it dialled or answered. Any other call is not relayed (20 Oct 2026: a test phone's own host,
+ * restarted mid-call, relayed a call answered on its screen and fed the caller silence); the host is the phone app,
+ * so it shows no call screen, and it stays silent through such a call.
  */
 object CallRegistry {
     private const val TAG = "SimRelayHost"
@@ -89,9 +89,9 @@ object CallRegistry {
             Daemon.callActive(Daemon.profile()?.sessionForSlot(maxOf(slotOf(audible), 0)) ?: (maxOf(slotOf(audible), 0) + 1))
         } else {
             Daemon.callIdle()
-            // A call without relayed audio: in box mode (in a drawer, nobody can answer on it) keep the host quiet;
-            // otherwise someone is holding the phone and it is their call.
-            BasicSilence.set(app, audible != null && Box.on)
+            // A call without relayed audio (Basic mode, or one the iPhone didn't dial or answer): the host stays quiet.
+            // TosbiSim governs every call from install until "Stop using this phone as a host", box mode or not.
+            BasicSilence.set(app, audible != null)
         }
     }
 

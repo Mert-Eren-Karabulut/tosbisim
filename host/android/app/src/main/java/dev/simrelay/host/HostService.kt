@@ -55,6 +55,23 @@ class HostService : Service() {
         Onboarding.hostRunning(this)
         Daemon.start(this)
         Relay.start(this)
+        android.os.Handler(mainLooper).postDelayed({ Onboarding.selfHeal(this) }, 30_000)   // after service.sh's own pass
+        welcomeOnce()
+    }
+
+    /**
+     * The first start after the Magisk install (a restart): the person who just installed it sees the home screen and
+     * no sign of TosbiSim. Open the host's own screen once, at the "pair your iPhone" step (20 Oct 2026 rehearsal).
+     */
+    private fun welcomeOnce() {
+        val p = getSharedPreferences("onboarding", MODE_PRIVATE)
+        if (p.getBoolean("welcomed", false)) return
+        p.edit().putBoolean("welcomed", true).apply()
+        if (Relay.pairedClient() != null) return
+        android.os.Handler(mainLooper).postDelayed({
+            runCatching { startActivity(Intent(this, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { Log.w(TAG, "welcome screen: $it") }
+        }, 8_000)
     }
 
     /** Silence policy: system, ring and notification volumes at minimum. Here, not in service.sh: on Android 11

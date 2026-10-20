@@ -2,8 +2,8 @@
   {
     "version": "0.12.6",
     "code": 42,
-    "en": "New: \"Stop using this phone as a host\" on the host's setup screen gives the phone back as an ordinary phone: its sounds and vibration, screen and power button settings, Wi-Fi and its own phone and messaging apps come back, your iPhone forgets it, and TosbiSim removes itself and restarts the phone.",
-    "tr": "Yeni: ana cihazın kurulum ekranındaki \"Bu telefonu ana cihaz olarak kullanmayı bırak\" telefonu sıradan bir telefon olarak geri verir: sesleri ve titreşimi, ekran ve güç tuşu ayarları, Wi-Fi'ı ve kendi telefon ve mesaj uygulamaları geri gelir, iPhone'unuz onu unutur, TosbiSim kendini kaldırıp telefonu yeniden başlatır."
+    "en": "Installing is now one step: the TosbiSim Host Magisk zip, installed from the Magisk app (Play Protect blocks a downloaded app). After the restart the host opens its screen by itself, ready to pair.\nTosbiSim is the phone app from the start and keeps the host silent through every call, box mode or not.\nThe host repairs itself if an update or Android takes away a permission, the battery exemption or the SMS role.\nNew: \"Stop using this phone as a host\" gives the phone back as an ordinary phone (sounds, screen and button settings, Wi-Fi, its own phone and messaging apps), your iPhone forgets it, and TosbiSim removes itself and restarts the phone.",
+    "tr": "Kurulum artık tek adım: TosbiSim Host Magisk zip dosyası, Magisk uygulamasından kurulur (Play Protect indirilen uygulamayı engelliyor). Yeniden başladıktan sonra ana cihaz ekranını kendiliğinden açar, eşleşmeye hazırdır.\nTosbiSim baştan telefon uygulamasıdır ve kutu modu açık olsun olmasın her aramada ana cihazı sessiz tutar.\nBir güncelleme veya Android bir izni, pil muafiyetini ya da SMS rolünü alırsa ana cihaz kendini onarır.\nYeni: \"Bu telefonu ana cihaz olarak kullanmayı bırak\" telefonu sıradan bir telefon olarak geri verir (sesler, ekran ve tuş ayarları, Wi-Fi, kendi telefon ve mesaj uygulamaları), iPhone'unuz onu unutur, TosbiSim kendini kaldırıp telefonu yeniden başlatır."
   },
   {
     "version": "0.12.5",

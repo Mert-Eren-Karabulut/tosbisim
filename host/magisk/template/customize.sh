@@ -10,7 +10,9 @@ if [ ! -f "$PRIV/SimRelayHost.apk" ]; then
   set_perm_recursive "$PRIV" 0 0 0755 0644
   ui_print "- using the installed TosbiSim Host app ($APK)"
 fi
-ui_print "- SIM Relay host: app, privapp permissions, simrelayd, silence policy"
+ui_print "- TosbiSim Host is installed."
+ui_print "- Restart the phone: TosbiSim starts by itself and opens"
+ui_print "  its screen, ready to pair with your iPhone."
 # Android keeps a parsed copy of system apps in /data/system/package_cache and, for files on the system
 # partition, only invalidates it on an OTA (mtime is ignored). Drop ours so an updated APK is re-read.
-rm -f /data/system/package_cache/*/SimRelayHost-* && ui_print "- cleared cached parse of SimRelayHost"
+rm -f /data/system/package_cache/*/SimRelayHost-*

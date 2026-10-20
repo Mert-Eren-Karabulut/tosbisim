@@ -106,6 +106,8 @@ object Retire {
         }.onFailure { Log.w(TAG, "retire: volume $s: $it") }
         val nm = app.getSystemService(NotificationManager::class.java)
         if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+        // The host left the ringer silent (or vibrate): ringing again is what an ordinary phone does (DND access needed)
+        runCatching { am.ringerMode = AudioManager.RINGER_MODE_NORMAL }.onFailure { Log.w(TAG, "retire: ringer: $it") }
     }
 
     /** The phone's own messaging app: the system app that receives SMS (Google Messages, Samsung Messages, MIUI's). */
@@ -141,7 +143,13 @@ object Retire {
             |if [ "${'$'}(getprop ro.product.manufacturer | tr A-Z a-z)" = samsung ]; then
             |  put system call_end_tone 1; put system call_conn_tone 1; put system volume_waiting_tone 1
             |fi
-            |case "${'$'}(orig global zen_mode)" in 1) cmd notification set_dnd priority;; 3) cmd notification set_dnd alarms;; *) cmd notification set_dnd off;; esac
+            |case "${'$'}(orig global zen_mode)" in 1) dnd=priority; z=1;; 3) dnd=alarms; z=3;; *) dnd=off; z=0;; esac
+            |# Android saves Do Not Disturb a moment later: a restart before that brought total silence back (20 Oct
+            |# 2026). Wait until it reads back, asking again if needed.
+            |for i in 1 2 3 4 5 6 7 8 9 10; do
+            |  [ "${'$'}(settings get global zen_mode)" = "${'$'}z" ] && break
+            |  cmd notification set_dnd ${'$'}dnd; sleep 1
+            |done
             |# Default apps: the ones from before TosbiSim, else the phone's own
             |sms=${'$'}(orig secure sms_default_application); usable "${'$'}sms" || sms=${q(systemSmsApp(app))}
             |usable "${'$'}sms" || sms=${'$'}(cmd package query-receivers --brief -a android.provider.Telephony.SMS_DELIVER 2>/dev/null \
@@ -166,7 +174,7 @@ object Retire {
             |} >> "${'$'}LOG" 2>&1
             |# Gone without a trace: every step above has run, so this script and its log go too
             |rm -f "${'$'}LOG" "${'$'}0"
-            |sleep 2
+            |sync; sleep 5                            # Android's own settings files (Do Not Disturb) reach the disk
             |svc power reboot || reboot
             |""".trimMargin()
     }

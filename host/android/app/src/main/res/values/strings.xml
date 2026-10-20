@@ -122,7 +122,7 @@
     <string name="service_ok">Running (%s)</string>
     <string name="service_down">Not running</string>
     <string name="c_permissions">Permissions and roles</string>
-    <string name="perm_ok">Phone, SMS, Bluetooth; default SMS app; never put to sleep; total silence</string>
+    <string name="perm_ok">Phone, SMS, Bluetooth; default phone and SMS app; never put to sleep; total silence</string>
     <string name="c_bluetooth">Bluetooth</string>
     <string name="ble_ok">On; your iPhone can find this phone</string>
     <string name="ble_off">Off</string>
