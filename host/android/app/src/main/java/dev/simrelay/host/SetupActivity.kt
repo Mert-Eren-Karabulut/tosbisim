@@ -367,6 +367,7 @@ class SetupActivity : Activity() {
     // ------------------------------------------------------------------ views
 
     private fun show(m: Model) {
+        if (Retire.running) return                     // the removal's own progress screen stays
         if (m != shown) {
             shown = m
             root.removeAllViews()
@@ -382,6 +383,7 @@ class SetupActivity : Activity() {
                 m.checks.forEach { addView(row(it)) }
             })
             root.addView(diagnostics(), lp(top = 14))
+            if (host) root.addView(retireCard(), lp(top = 14))
             root.addView(text(getString(R.string.host_version, BuildConfigInfo.version(this)), 12f, c.secondary).apply { setPadding(dp(4), dp(16), 0, 0) })
         }
         updateCountdown()
@@ -459,6 +461,32 @@ class SetupActivity : Activity() {
                 reportSent = true; shown = null; tick.run()
             }
         }, lp(top = 10))
+    }
+
+    /** "Stop using this phone as a host": the phone back as an ordinary phone, TosbiSim removed (Retire). */
+    private fun retireCard() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(c.card, 16)
+        setPadding(dp(18), dp(14), dp(18), dp(14))
+        addView(text(getString(R.string.retire_title), 15f, c.text, bold = true))
+        addView(text(getString(R.string.retire_note), 12.5f, c.secondary).apply { setPadding(0, dp(4), 0, 0) })
+        addView(button(Btn(getString(R.string.retire_btn), null), primary = false).apply {
+            setTextColor(c.fail)
+            setOnClickListener {
+                AlertDialog.Builder(this@SetupActivity).setTitle(R.string.retire_confirm_title)
+                    .setMessage(R.string.retire_confirm_body)
+                    .setPositiveButton(R.string.retire_confirm_yes) { _, _ -> retire() }
+                    .setNegativeButton(R.string.btn_cancel, null).show()
+            }
+        }, lp(top = 10))
+    }
+
+    private fun retire() {
+        root.removeAllViews()
+        root.addView(text(getString(R.string.app_name), 28f, c.text, bold = true))
+        val status = text("", 16f, c.text).apply { setPadding(0, dp(14), 0, 0); setLineSpacing(0f, 1.15f) }
+        root.addView(status)
+        Retire.start(this) { s -> status.text = s }
     }
 
     private fun badge(m: Mark, size: Int) = TextView(this).apply {

@@ -134,7 +134,7 @@ object Relay {
         Sims.watch(app) { Sims.protectNewSims(app); Sims.log(app); statusChanged() }
         Sims.attemptsKnown = { main.post { statusChanged() } }
         main.postDelayed(keepAlive, KEEPALIVE_MS)
-        main.postDelayed({ guardSmsRole() }, 20_000)   // after the daemon is up (service.sh claims it 90 s after boot too)
+        main.postDelayed({ guardSmsRole(); guardDialerRole() }, 20_000)   // after the daemon is up (service.sh claims SMS 90 s after boot too)
         Log.i(TAG, "relay up; pinned client=${pinned() ?: "none"}")
     }
 
@@ -392,6 +392,24 @@ object Relay {
         SmsStore.pending(app).forEach { send(d, Envelope.newBuilder().setSmsReceived(it)) }
     }
 
+    /**
+     * This phone stops being a host (Retire): the iPhone gets an Unpair it didn't ask for, which tells it the host is
+     * gone for good, then the host forgets it as after any Unpair and stops advertising. [done] runs off main.
+     */
+    fun retire(done: () -> Unit) = main.post {
+        val p = app.getSharedPreferences("relay", Context.MODE_PRIVATE)
+        val mac = p.getString("client_mac", null)
+        broadcast(Envelope.newBuilder().setUnpair(Unpair.getDefaultInstance()))
+        main.postDelayed({
+            targets().forEach { it.drop() }
+            p.edit().remove("pinned_install_id").remove("client_model").remove("client_mac").apply()
+            trusted.clear()
+            if (::ble.isInitialized) runCatching { ble.stop() }
+            Log.i(TAG, "RETIRED: the iPhone was told, pairing forgotten")
+            pairExec.execute { if (mac != null) RootBt.unbond(app, mac); done() }
+        }, 1500)                                               // time for the Unpair to reach the iPhone
+    }
+
     /** The paired iPhone forgot this host: forget it too (pin, Bluetooth bond), so a new pairing starts clean. A
      *  stale bond made the next pairing fail ("encryption is insufficient", 19 Oct). */
     private fun unpair(d: Peer, replyTo: Int) {
@@ -430,7 +448,24 @@ object Relay {
      * 19 Oct: Google Messages had taken the role back after the SIM went in; "Hello" from the S20 FE was never relayed).
      * Checked at start and every keep-alive; taken back as root when lost.
      */
+    /**
+     * The host is the phone app from the moment it runs, not only in box mode (20 Oct 2026: during setup the
+     * phone's own call screen came up for the call test, as if the host weren't in charge). Its non-UI InCallService
+     * then sees every call and no call screen lights the host up. The app that had the role is kept for "Stop using
+     * this phone as a host" (Retire), which hands it back.
+     */
+    private fun guardDialerRole() {
+        if (Retire.running) return
+        val tm = app.getSystemService(android.telecom.TelecomManager::class.java) ?: return
+        val holder = tm.defaultDialerPackage
+        if (holder == app.packageName) return
+        Retire.rememberDialer(app, holder)
+        Log.w(TAG, "not the phone app (${holder ?: "none"}): taking the role")
+        Daemon.role("android.app.role.DIALER", app.packageName)
+    }
+
     private fun guardSmsRole() {
+        if (Retire.running) return                              // giving the phone back: the role goes to its old app
         val rm = app.getSystemService(android.app.role.RoleManager::class.java) ?: return
         if (rm.isRoleHeld(android.app.role.RoleManager.ROLE_SMS)) return
         Log.w(TAG, "not the default SMS app any more: taking the role back")
@@ -510,6 +545,7 @@ object Relay {
             askForHello()
             HostWifi.evaluate("keep-alive")
             guardSmsRole()
+            guardDialerRole()
             Diag.retry()                                     // reports queued while offline
             if (Box.blocksPowerKey) Daemon.powerKey(true)    // the daemon's dead-man: an unconfirmed block lapses in 15 min
             broadcast(Envelope.newBuilder().setKeepAlive(KeepAlive.newBuilder().setN(++kaN)))

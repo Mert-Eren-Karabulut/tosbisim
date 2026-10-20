@@ -26,12 +26,16 @@ Unlocking the bootloader erases the phone and may void its warranty. TosbiSim ne
 
 ## Setting up a host
 
-1. Install `TosbiSim-Host-<version>.apk` from the Releases page (allow installs from your browser/file manager).
-   It shows whether the phone is supported and what to do next.
-2. Unlock the bootloader and install [Magisk](https://github.com/topjohnwu/Magisk) (see its guide for your phone).
-3. Open TosbiSim Host → *Check root* (allow it in Magisk) → *Install TosbiSim Host* → *Restart the phone*.
-4. Pair from the TosbiSim iPhone app, then run *Host → Call audio → Run the call test* with a friend.
+1. Check your phone on the [support page](https://mert-eren-karabulut.github.io/tosbisim/), then unlock the
+   bootloader and install [Magisk](https://github.com/topjohnwu/Magisk) (see its guide for your phone).
+2. On the phone, download `TosbiSim-Host-<version>-Magisk.zip` from the Releases page.
+3. Open Magisk → *Modules* → *Install from storage* → choose the zip → *Reboot*. TosbiSim Host starts by itself
+   after the restart. (There is no separate app to install: Google Play Protect blocks it on many phones; the
+   Magisk module carries it.)
+4. Pair from the TosbiSim iPhone app (*Add host*), then run *Host → Call audio → Run the call test* with a friend.
 5. Turn on *Box mode* and put the phone away. To use its screen again: Volume Up ×3, then Volume Down ×3.
+6. To give the phone back: on its screen, *Stop using this phone as a host*. Its settings, sounds and default apps
+   come back, TosbiSim removes itself and the phone restarts (Magisk stays).
 
 ## Building from source
 
@@ -52,6 +56,8 @@ Host: GPL-3.0-or-later ([LICENSE](LICENSE)). Protocol: MIT ([protocol/LICENSE](p
 **Eski bir Android telefonu iPhone'unuz için bir SIM kutusuna dönüştürün.** SIM'inizi root'lu yedek bir Android
 telefona takın, çekmeceye koyun; aramalar, mesajlar ve mobil veri Bluetooth ile iPhone'unuza gelsin. Hangi
 telefonların çalıştığını [destek sayfasında](https://mert-eren-karabulut.github.io/tosbisim/) görebilirsiniz. Arama
-sesi, her telefonda kısa bir arama testinden sonra açılır. Kurulum için yukarıdaki adımları izleyin: APK'yı kurun,
-önyükleyici kilidini açıp Magisk kurun, uygulamadan *TosbiSim Ana Cihaz'ı kur*'a dokunun, iPhone'dan eşleştirip
-arama testini yapın. TosbiSim telefonun IMEI'sini asla değiştirmez.
+sesi, her telefonda kısa bir arama testinden sonra açılır. Kurulum: önyükleyici kilidini açıp Magisk kurun,
+`TosbiSim-Host-<sürüm>-Magisk.zip` dosyasını Releases sayfasından telefona indirin, Magisk → *Modüller* →
+*Depolamadan yükle* ile seçip *Yeniden başlat*'a dokunun (ayrı bir uygulama kurmanız gerekmez). Ardından
+iPhone'dan eşleştirip arama testini yapın. Telefonu geri almak için ekranındaki *Bu telefonu ana cihaz olarak
+kullanmayı bırak*'a dokunun. TosbiSim telefonun IMEI'sini asla değiştirmez.

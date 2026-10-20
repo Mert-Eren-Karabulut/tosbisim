@@ -152,4 +152,15 @@
     <string name="btn_sending">Gönderiliyor…</string>
     <string name="report_sent">Rapor gönderildi. Teşekkürler!</string>
     <string name="report_failed">Şu an gönderilemedi; telefon internete bağlanınca gönderilir.</string>
+    <!-- stop using as a host (Retire) -->
+    <string name="retire_title">Bu telefonu ana cihaz olarak kullanmayı bırak</string>
+    <string name="retire_note">Telefonu normal kullanıma geri verir: sesleri, titreşimi, ekranı ve tuşları, kendi telefon ve mesaj uygulamaları ve Wi-Fi geri gelir, iPhone\'unuz onu unutur ve TosbiSim kaldırılır. Sonunda telefon yeniden başlar. Magisk ve kilidi açılmış önyükleyici kalır.</string>
+    <string name="retire_btn">Ana cihaz olarak kullanmayı bırak…</string>
+    <string name="retire_confirm_title">TosbiSim bu telefondan kaldırılsın mı?</string>
+    <string name="retire_confirm_body">iPhone\'unuza bu SIM\'in aramaları ve mesajları artık gelmez. Telefonu daha sonra yeniden ana cihaz yapmak için TosbiSim\'i kurup yeniden eşleştirin.\n\nMagisk (root) ve kilidi açık önyükleyici kalır: bunlar TosbiSim\'den önce kurulmuştu. Telefonu tamamen fabrika yazılımına döndürmek için ardından Magisk\'i kendi uygulamasından kaldırın.</string>
+    <string name="retire_confirm_yes">Kaldır ve yeniden başlat</string>
+    <string name="retire_step_iphone">iPhone\'unuza bildiriliyor…</string>
+    <string name="retire_step_settings">Telefonun ayarları geri veriliyor…</string>
+    <string name="retire_step_restart">TosbiSim kaldırılıyor. Telefon birazdan yeniden başlayacak.</string>
+    <string name="retire_failed">TosbiSim kaldırılamadı (root izni verilmedi). Magisk\'i açın, TosbiSim Host modülünü kaldırın ve yeniden başlatın.</string>
 </resources>

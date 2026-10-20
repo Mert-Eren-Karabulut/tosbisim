@@ -120,7 +120,7 @@ object Box {
 
     // Back on at the first screen-off after the escape window (or at once if the screen is already off).
     private val resume = Runnable {
-        if (!on || suspended) return@Runnable
+        if (!on || suspended || Retire.running) return@Runnable
         if (app.getSystemService(PowerManager::class.java).isInteractive) return@Runnable  // wait for SCREEN_OFF
         Log.i(TAG, "box mode back on after escape")
         apply(); onChange()
@@ -129,7 +129,7 @@ object Box {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_SCREEN_ON -> if (on && !suspended) {
+                Intent.ACTION_SCREEN_ON -> if (on && !suspended && !Retire.running) {
                     Log.i(TAG, "box mode: display turned on, putting it back to sleep")
                     Daemon.screenOff()
                 }
@@ -170,7 +170,7 @@ object Box {
             val (ns, key) = id.split("/", limit = 2)
             write(ns, key, orig.getString(id))
         }
-        orig.optString("dialer").takeIf { it.isNotEmpty() && it != app.packageName }?.let { Daemon.role(DIALER_ROLE, it) }
+        // The phone app role stays: a host is the phone app whether or not box mode is on (Relay.guardDialerRole)
         if (orig.optBoolean("location", false)) setLocation(true)
         orig.optJSONArray("netblock")?.let { a -> for (i in 0 until a.length()) Daemon.netblock(a.getInt(i), false) }
         setLteOnly(false)

@@ -55,6 +55,8 @@
         <!-- Box mode blocks their network -->
         <package android:name="com.google.android.gms" />
         <package android:name="com.android.vending" />
+        <!-- "Stop using this phone as a host" hands the SMS role back to the phone's own messaging app -->
+        <intent><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent>
     </queries>
 
     <application

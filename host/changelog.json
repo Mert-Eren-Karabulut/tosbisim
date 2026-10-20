@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.6",
+    "code": 42,
+    "en": "New: \"Stop using this phone as a host\" on the host's setup screen gives the phone back as an ordinary phone: its sounds and vibration, screen and power button settings, Wi-Fi and its own phone and messaging apps come back, your iPhone forgets it, and TosbiSim removes itself and restarts the phone.",
+    "tr": "Yeni: ana cihazın kurulum ekranındaki \"Bu telefonu ana cihaz olarak kullanmayı bırak\" telefonu sıradan bir telefon olarak geri verir: sesleri ve titreşimi, ekran ve güç tuşu ayarları, Wi-Fi'ı ve kendi telefon ve mesaj uygulamaları geri gelir, iPhone'unuz onu unutur, TosbiSim kendini kaldırıp telefonu yeniden başlatır."
+  },
+  {
     "version": "0.12.5",
     "code": 41,
     "en": "Calls answered on the host phone itself are now left alone: only calls your iPhone made or answered go through TosbiSim. Before, a call taken on the host's own screen lost its microphone.\nCall audio no longer drops if a diagnostic tool checks on the host during a call.\nA call where the caller's voice never arrives is now reported (with diagnostics on), so it can be fixed.",

@@ -63,7 +63,9 @@ class HostService : Service() {
      *  Ring volume 0 moves the ringer from silent to vibrate, which turns Do Not Disturb off: total silence is put
      *  back afterwards (service.sh gives us DND access). */
     private fun silenceStreams() {
+        if (Retire.running) return
         val am = getSystemService(AudioManager::class.java) ?: return
+        Retire.snapshotVolumes(this, am)                    // once: what "Stop using as host" gives back
         for (s in intArrayOf(AudioManager.STREAM_SYSTEM, AudioManager.STREAM_RING, AudioManager.STREAM_NOTIFICATION)) {
             runCatching { am.setStreamVolume(s, am.getStreamMinVolume(s), 0) }.onFailure { Log.w(TAG, "volume $s: $it") }
         }

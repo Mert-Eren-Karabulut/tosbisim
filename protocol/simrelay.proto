@@ -48,7 +48,7 @@ message Envelope {
     WifiForget wifi_forget = 60;        // client -> host, Bluetooth only
     DiagnosticsRequest diagnostics_request = 61; // client -> host: the host's side of a problem report
     Diagnostics diagnostics = 62;                // host -> client (reply)
-    Unpair unpair = 63;                          // client -> host: "forget this host" on the iPhone
+    Unpair unpair = 63;                          // client -> host: "forget this host" on the iPhone (host -> client: its answer, or unasked: the host was removed)
   }
 }
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build a release of the TosbiSim Host APK (the one file users sideload): daemon -> embedded Magisk module -> signed
-# APK in host/out/. Needs the release key in ~/.tosbisim (see host/android/app/build.gradle.kts).
+# Build a release of TosbiSim Host: daemon -> embedded Magisk module -> signed APK -> the Magisk zip, in host/out/.
+# Users install ONLY the Magisk zip (20 Oct 2026: Play Protect blocks the sideloaded APK); the APK itself is what
+# hosts download for over-the-air self-updates (--publish). Needs the release key in ~/.tosbisim.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PUBLISH=0; [ "${1:-}" = "--publish" ] && PUBLISH=1
@@ -26,6 +27,22 @@ APKSIGNER="$(ls "$HOME"/Library/Android/sdk/build-tools/*/apksigner | sort -V | 
 "$APKSIGNER" verify --print-certs "$OUT" | grep -m1 "SHA-256"
 (cd "$HERE/out" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
 echo "release: $OUT"
+
+# The same host as a Magisk module that carries the app: installed from the Magisk app (Modules -> Install from
+# storage) it puts TosbiSim on as a system app, which Play Protect's sideloading block never sees. That block stops the
+# plain APK cold on some phones ("App blocked to protect your device", no way past it: SMS permissions; Redmi Note 8
+# Pro, 20 Oct 2026). customize.sh uses the APK it finds in the module.
+ZIP="$HERE/out/TosbiSim-Host-$VER-Magisk.zip"
+STAGE="$(mktemp -d)"
+unzip -q "$HERE/android/app/src/embed/assets/module/tosbisim-host-module.zip" -d "$STAGE"
+mkdir -p "$STAGE/system/priv-app/SimRelayHost"
+cp "$OUT" "$STAGE/system/priv-app/SimRelayHost/SimRelayHost.apk"
+sed -i '' "s/^version=.*/version=$VER/; s/^versionCode=.*/versionCode=$CODE/" "$STAGE/module.prop"
+rm -f "$ZIP"
+(cd "$STAGE" && zip -qr -X "$ZIP" .)
+rm -rf "$STAGE"
+(cd "$HERE/out" && shasum -a 256 "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
+echo "magisk: $ZIP"
 
 # --publish: hand it to api.tosbisim.com, where hosts pick it up (they ask the iPhone before installing).
 if [ "$PUBLISH" = 1 ]; then

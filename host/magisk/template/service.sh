@@ -11,6 +11,26 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
   # Our logs must show: MediaTek ROMs set log.tag=M, which hides app logs (Redmi Note 8 Pro, 18 Oct).
   setprop log.tag.SimRelayHost I; setprop log.tag.simrelayd I
 
+  # What the phone had before TosbiSim changed anything, once: the host app's "Stop using this phone as a host" puts it
+  # back. A phone that already ran this script has only TosbiSim's values left, so it records none (Android's defaults
+  # are used then).
+  ORIG=/data/adb/tosbisim/original-settings.txt
+  if [ ! -e "$ORIG" ]; then
+    # TosbiSim ran here before: its folder (the daemon makes it) or earlier runs of this script in the log
+    if [ -e /data/adb/tosbisim ] || [ -e "$LOG.1" ] || [ "$(grep -c 'service.sh start' "$LOG" 2>/dev/null)" -gt 1 ]; then
+      mkdir -p /data/adb/tosbisim
+      echo "# set up before snapshots: defaults" > "$ORIG"
+    else
+      mkdir -p /data/adb/tosbisim
+      for k in system/vibrate_when_ringing system/haptic_feedback_enabled system/sound_effects_enabled \
+               system/lockscreen_sounds_enabled system/dtmf_tone system/call_end_tone system/call_conn_tone \
+               system/volume_waiting_tone global/zen_mode secure/sms_default_application secure/dialer_default_application; do
+        echo "${k%%/*} ${k#*/} $(settings get ${k%%/*} ${k#*/})"
+      done > "$ORIG.tmp" && mv -f "$ORIG.tmp" "$ORIG"
+    fi
+    chmod 600 "$ORIG"; echo "original settings: $(grep -vc '^#' "$ORIG") recorded"
+  fi
+
   # Silence policy: the host sits in a drawer and must never ring, vibrate or click.
   cmd notification set_dnd none                       # Do Not Disturb, total silence
   cmd notification allow_dnd $PKG                     # DND access: the app may set ring/notification volume to 0
@@ -29,10 +49,14 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
   # that command runs ActivityThread.systemMain() inside system_server and crashes it ~25 s later (Redmi Note 8 Pro).
 
   # Runtime permissions and battery-optimisation exemption for the host app.
-  for p in READ_PHONE_STATE POST_NOTIFICATIONS CALL_PHONE BLUETOOTH_ADVERTISE BLUETOOTH_CONNECT \
-           RECEIVE_SMS SEND_SMS READ_SMS RECEIVE_MMS RECEIVE_WAP_PUSH; do
+  # Only those this Android has (Bluetooth advertise/connect are 12+, notifications 13+): Android 11 printed a stack
+  # trace per unknown permission into this log.
+  SDK=$(getprop ro.build.version.sdk)
+  for p in READ_PHONE_STATE CALL_PHONE RECEIVE_SMS SEND_SMS READ_SMS RECEIVE_MMS RECEIVE_WAP_PUSH; do
     pm grant $PKG android.permission.$p
   done
+  [ "$SDK" -ge 31 ] && for p in BLUETOOTH_ADVERTISE BLUETOOTH_CONNECT; do pm grant $PKG android.permission.$p; done
+  [ "$SDK" -ge 33 ] && pm grant $PKG android.permission.POST_NOTIFICATIONS
   # Default SMS app (SMS arrive via SMS_DELIVER to us): the app claims and guards the role itself (Relay
   # guardSmsRole, through simrelayd's time-limited ROLE), once the role service is up.
   dumpsys deviceidle whitelist +$PKG
