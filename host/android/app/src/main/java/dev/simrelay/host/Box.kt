@@ -59,10 +59,12 @@ object Box {
     @Volatile private var hotspotOn = false
 
     private val prefs get() = app.getSharedPreferences("box", Context.MODE_PRIVATE)
-    val on get() = prefs.getBoolean("on", false)
-    val suspendedUntil get() = prefs.getLong("suspended_until", 0)
+    /** [start] ran: the readers below are safe before it (the setup screen and Retire can come first; audit, 20 Oct 2026). */
+    val ready get() = ::app.isInitialized
+    val on get() = ready && prefs.getBoolean("on", false)
+    val suspendedUntil get() = if (ready) prefs.getLong("suspended_until", 0) else 0L
     val suspended get() = System.currentTimeMillis() < suspendedUntil
-    val chargeLimit get() = prefs.getInt("charge_limit", DEFAULT_CHARGE_LIMIT)
+    val chargeLimit get() = if (ready) prefs.getInt("charge_limit", DEFAULT_CHARGE_LIMIT) else DEFAULT_CHARGE_LIMIT
     /** Box settings are currently applied (on and not suspended by the escape gesture). */
     private val applied get() = prefs.getBoolean("applied", false)
     /** The power button is blocked while box settings are applied (the daemon re-grabs it after a restart). */
@@ -148,7 +150,11 @@ object Box {
             if (!orig.has(id)) orig.put(id, cur)
             if (cur != value) write(ns, key, value)
         }
-        if (!orig.has("dialer")) orig.put("dialer", app.getSystemService(TelecomManager::class.java).defaultDialerPackage ?: "")
+        // The phone app to give back at Retire, before the role is taken; never ourselves (the host already holds it
+        // from its first start, and "us" was recorded as the phone's own; audit, 20 Oct 2026)
+        val dialer = app.getSystemService(TelecomManager::class.java).defaultDialerPackage
+        Retire.rememberDialer(app, dialer)
+        if (!orig.has("dialer") && dialer != app.packageName) orig.put("dialer", dialer ?: "")
         // uids whose network box mode blocks (recorded so restore unblocks exactly these)
         val uids = NET_BLOCK.mapNotNull { runCatching { app.packageManager.getPackageUid(it, 0) }.getOrNull() }.distinct()
         orig.put("netblock", org.json.JSONArray(uids))

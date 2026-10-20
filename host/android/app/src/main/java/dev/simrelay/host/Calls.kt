@@ -86,7 +86,8 @@ object CallRegistry {
         val audible = active.firstOrNull(::isOwned) ?: active.firstOrNull() ?: dialing.firstOrNull(::isOwned) ?: dialing.firstOrNull()
         if (audible != null && isOwned(audible) && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })) {
             BasicSilence.set(app, false)
-            Daemon.callActive(Daemon.profile()?.sessionForSlot(maxOf(slotOf(audible), 0)) ?: (maxOf(slotOf(audible), 0) + 1))
+            Daemon.callActive(Daemon.profile()?.sessionForSlot(maxOf(slotOf(audible), 0)) ?: (maxOf(slotOf(audible), 0) + 1),
+                connected = audible.stateCompat == Call.STATE_ACTIVE)
         } else {
             Daemon.callIdle()
             // A call without relayed audio (Basic mode, or one the iPhone didn't dial or answer): the host stays quiet.
@@ -103,6 +104,9 @@ object CallRegistry {
         disown(call, id)
         if (byId.values.none { it.stateCompat == Call.STATE_ACTIVE || it.stateCompat == Call.STATE_DIALING }) Daemon.callIdle()
     }
+
+    /** Any call at all (ringing, dialling, active or held): cheap, and safe before [init]. */
+    fun anyCall(): Boolean = byId.isNotEmpty()
 
     /** Current calls, for replay after the client reconnects. */
     fun snapshot(): List<CallEvent> = byId.values.map { event(it) }
@@ -207,27 +211,32 @@ val Call.stateCompat: Int get() = if (android.os.Build.VERSION.SDK_INT >= 31) de
 
 /**
  * Basic mode (no measured audio path yet): an answered call would otherwise use the host's own earpiece and mic, in a
- * drawer. Without a profile there are no device mutes to apply, so use what every Android phone has: mic mute and
- * the lowest call volume, restored when the call ends. (Hard rule 1: the host stays silent.)
+ * bag or a drawer. Without a profile there are no device mutes to apply, so use what every Android phone has: mic mute
+ * and the lowest call volume, restored when the call ends. (Hard rule 1: the host stays silent.)
+ * The volume to give back is kept on disk: a host restarted mid-call (keep-alive, update, crash) found the minimum,
+ * saved that, and made it the phone's call volume for good (audit, 20 Oct 2026).
  */
 object BasicSilence {
     private const val TAG = "SimRelayHost"
-    private var saved: Int? = null
+    private const val KEY = "voice_volume"
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("basic_silence", Context.MODE_PRIVATE)
 
-    fun set(ctx: android.content.Context, on: Boolean) {
+    fun set(ctx: Context, on: Boolean) {
         val am = ctx.getSystemService(android.media.AudioManager::class.java) ?: return
+        val p = prefs(ctx)
+        val saved = p.getInt(KEY, -1)
         runCatching {
-            if (on && saved == null) {
-                saved = am.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)
+            if (on && saved < 0) {
+                p.edit().putInt(KEY, am.getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)).commit()
                 am.isMicrophoneMute = true
                 am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, am.getStreamMinVolume(android.media.AudioManager.STREAM_VOICE_CALL), 0)
-                android.util.Log.i(TAG, "basic-mode call: host mic muted, call volume at minimum")
-            } else if (!on && saved != null) {
+                Log.i(TAG, "basic-mode call: host mic muted, call volume at minimum")
+            } else if (!on && saved >= 0) {
                 am.isMicrophoneMute = false
-                am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, saved!!, 0)
-                saved = null
-                android.util.Log.i(TAG, "basic-mode call over: host mic and call volume restored")
+                am.setStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL, saved, 0)
+                p.edit().remove(KEY).apply()
+                Log.i(TAG, "basic-mode call over: host mic and call volume restored")
             }
-        }.onFailure { android.util.Log.w(TAG, "basic-mode silence: $it") }
+        }.onFailure { Log.w(TAG, "basic-mode silence: $it") }
     }
 }

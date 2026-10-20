@@ -59,12 +59,28 @@ static long long now_ns(void) {
     return (long long)t.tv_sec * 1000000000LL + t.tv_nsec;
 }
 
+// Every child starts with no signal blocked and SIGPIPE at its default: the daemon blocks SIGTERM & co. outside its
+// ppoll and ignores SIGPIPE, and both would be inherited (a logcat that ignores the SIGTERM log_stop sends).
+static int spawn_pid(char *const argv[], pid_t *pid) {
+    posix_spawnattr_t at;
+    sigset_t none, def;
+    sigemptyset(&none);
+    sigemptyset(&def);
+    sigaddset(&def, SIGPIPE);
+    posix_spawnattr_init(&at);
+    posix_spawnattr_setsigmask(&at, &none);
+    posix_spawnattr_setsigdefault(&at, &def);
+    posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
+    int rc = posix_spawn(pid, argv[0], NULL, &at, argv, environ);
+    posix_spawnattr_destroy(&at);
+    if (rc != 0) { LOGW("spawn %s: %s", argv[0], strerror(rc)); return -1; }
+    return 0;
+}
+
 // Fire-and-forget: the main loop reaps it (box_reap).
 static int spawn(char *const argv[]) {
     pid_t pid;
-    int rc = posix_spawn(&pid, argv[0], NULL, NULL, argv, environ);
-    if (rc != 0) { LOGW("spawn %s: %s", argv[0], strerror(rc)); return -1; }
-    return 0;
+    return spawn_pid(argv, &pid);
 }
 
 int box_screen(int on) {
@@ -114,6 +130,20 @@ static const struct { const char *path; int stop; } CUT_NODES[] = {
 
 static int g_limit = 0;                // 0 or 100 = no limit
 static int g_cutting = 0;
+// Re-cuts after something reset the node: at most RECUT_MAX an hour. A kernel that undoes every write would otherwise
+// turn each write's power event into the next write, for ever; past the budget the limit is left alone until the hour
+// is over (the battery charges, which is the safe direction).
+#define RECUT_MAX 6
+static long g_recut_window = -1;       // CLOCK_BOOTTIME s the hour began, -1 = none yet (0 is a real time: boot)
+static int g_recuts = 0;
+static long g_recut_paused_until = 0;  // budget spent: the limit is left alone until then (CLOCK_BOOTTIME s)
+static int g_cut_failed = 0;
+
+static long boot_s(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_BOOTTIME, &t);                    // counts deep sleep too
+    return (long)t.tv_sec;
+}
 
 // access(W_OK) always passes for root: a read-only sysfs node would be picked, hide a working one, and report charge
 // control that isn't there (audit, 19 Oct). The node's own write bit says what the kernel allows.
@@ -156,7 +186,12 @@ static void set_cut(int on) {
     int i = cut_index();
     if (i < 0) return;
     const char *node = CUT_NODES[i].path;
-    if (write_int(node, on ? CUT_NODES[i].stop : !CUT_NODES[i].stop) < 0) return;
+    if (write_int(node, on ? CUT_NODES[i].stop : !CUT_NODES[i].stop) < 0) {
+        if (!g_cut_failed) LOGW("charge limit: writing %s failed: %s", node, strerror(errno));   // once until one works
+        g_cut_failed = 1;
+        return;
+    }
+    g_cut_failed = 0;
     if (g_cutting != on) LOGI("charge limit: %s (%s)", on ? "running on battery down to the limit" : "charger power back", node);
     g_cutting = on;
 }
@@ -168,13 +203,38 @@ const char *box_charge_node(void) {
 }
 
 void box_charge_check(void) {
-    if (!cut_node()) return;
+    int i = cut_index();
+    if (i < 0) return;
     int level = read_int(BATT_CAPACITY);
     if (level < 0) return;
     if (g_limit <= 0 || g_limit >= 100 || level <= MIN_ON_BATTERY) { if (g_cutting) set_cut(0); return; }
+    long now = boot_s();
+    if (g_recut_paused_until) {
+        if (now < g_recut_paused_until) return;                  // still in the hour we gave up
+        g_recut_paused_until = 0;
+    }
     int with_cap = cap_node() != NULL;
+    int keep_cut_above = with_cap ? g_limit : g_limit - 5;      // the cut ends at this level
+    // The kernel can undo the cut behind our back: the Redmi Note 8 Pro's charger driver clears input_suspend when a
+    // charger is plugged in, and the battery charged past the limit (95 -> 96 %, 20 Oct 2026). Read it back on every
+    // power event and put it back. Only a re-cut that is really written counts against the hour's budget (audit,
+    // 20 Oct 2026).
+    if (g_cutting && read_int(CUT_NODES[i].path) != CUT_NODES[i].stop) {
+        g_cutting = 0;                                          // honest state: we are not cutting
+        if (level <= keep_cut_above) return;                    // the cut would end here anyway
+        if (g_recut_window < 0 || now - g_recut_window >= 3600) { g_recut_window = now; g_recuts = 0; }
+        if (g_recuts >= RECUT_MAX) {
+            LOGW("charge limit: %s keeps being reset, leaving it this hour", CUT_NODES[i].path);
+            g_recut_paused_until = g_recut_window + 3600;
+            return;
+        }
+        g_recuts++;
+        LOGW("charge limit: the kernel reset %s, cutting again (%d this hour)", CUT_NODES[i].path, g_recuts);
+        set_cut(1);
+        return;
+    }
     if (!g_cutting && (with_cap ? level > g_limit : level >= g_limit)) set_cut(1);
-    else if (g_cutting && level <= (with_cap ? g_limit : g_limit - 5)) set_cut(0);
+    else if (g_cutting && level <= keep_cut_above) set_cut(0);
 }
 
 int box_charge(int percent) {
@@ -228,28 +288,76 @@ void box_uevent(int fd) {
 
 #define NB_CHAIN "tosbisim_block"
 
-// Runs a command and returns its exit code (same thread as box_reap, which therefore never takes this child).
-void box_reap(void) { while (waitpid(-1, NULL, WNOHANG) > 0) {} }
-
-// The rules change runs as one detached script: iptables waits for the system's xtables lock (-w 5 per call, a dozen
+// The rules change runs as a detached script: iptables waits for the system's xtables lock (-w 5 per call, a dozen
 // calls), which inside the main loop could stall the socket, the keys and the escape gesture for up to a minute
-// (audit, 19 Oct). The loop's reaper collects it.
+// (audit, 19 Oct). One script at a time, and the last state asked for each uid wins: two scripts running at once
+// could finish out of order, and box on -> off in quick succession left Play services blocked (audit, 20 Oct 2026).
+#define NB_MAX 16
+typedef struct { int uid, want, done; } nb_t;          // done: the state last applied, -1 = none
+static nb_t g_nb[NB_MAX];
+static int g_nnb = 0;
+static pid_t g_nb_pid = 0;                              // the running script
+static int g_nb_running = -1;                           // its g_nb slot, and the state it applies
+static int g_nb_running_on = 0;
+
+static void nb_next(void) {
+    if (g_nb_pid > 0) return;
+    for (int k = 0; k < g_nnb; k++) {
+        if (g_nb[k].want == g_nb[k].done) continue;
+        int uid = g_nb[k].uid, on = g_nb[k].want;
+        char script[1024];
+        snprintf(script, sizeof(script),
+            "for b in /system/bin/iptables /system/bin/ip6tables; do "
+            "$b -w 5 -N " NB_CHAIN " 2>/dev/null; "                        // chain + jump from OUTPUT, created once
+            "$b -w 5 -C OUTPUT -j " NB_CHAIN " 2>/dev/null || $b -w 5 -I OUTPUT 1 -j " NB_CHAIN "; "
+            "%s; done",
+            on ? "$b -w 5 -C " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT 2>/dev/null || $b -w 5 -A " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT"
+               : "while $b -w 5 -D " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT 2>/dev/null; do :; done");
+        char cmd[1200];
+        snprintf(cmd, sizeof(cmd), script, uid);
+        char *argv[] = { "/system/bin/sh", "-c", cmd, NULL };
+        pid_t pid;
+        if (spawn_pid(argv, &pid) != 0) {
+            LOGW("network block: spawn failed");
+            g_nb[k].done = on;                                  // not retried in a loop; the next request tries again
+            continue;
+        }
+        g_nb_pid = pid;
+        g_nb_running = k;
+        g_nb_running_on = on;
+        LOGI("network %s for uid %d", on ? "blocked" : "unblocked", uid);
+        return;
+    }
+}
+
+// Collect finished fire-and-forget children (same thread as everything that spawns them), then start the next
+// network-block script if one is waiting. SIGCHLD wakes the main loop, so that happens at once.
+void box_reap(void) {
+    pid_t pid;
+    int st;
+    while ((pid = waitpid(-1, &st, WNOHANG)) > 0) {
+        if (pid != g_nb_pid) continue;
+        if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) LOGW("network block script for uid %d ended with status %d", g_nb[g_nb_running].uid, st);
+        g_nb[g_nb_running].done = g_nb_running_on;
+        g_nb_pid = 0;
+        g_nb_running = -1;
+    }
+    nb_next();
+}
+
 int box_netblock(int uid, int on) {
     if (uid < 10000 || uid > 99999) return -1;                     // app uids only
-    char script[1024];
-    snprintf(script, sizeof(script),
-        "for b in /system/bin/iptables /system/bin/ip6tables; do "
-        "$b -w 5 -N " NB_CHAIN " 2>/dev/null; "                        // chain + jump from OUTPUT, created once
-        "$b -w 5 -C OUTPUT -j " NB_CHAIN " 2>/dev/null || $b -w 5 -I OUTPUT 1 -j " NB_CHAIN "; "
-        "%s; done",
-        on ? "$b -w 5 -C " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT 2>/dev/null || $b -w 5 -A " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT"
-           : "while $b -w 5 -D " NB_CHAIN " -m owner --uid-owner %1$d -j REJECT 2>/dev/null; do :; done");
-    char cmd[1200];
-    snprintf(cmd, sizeof(cmd), script, uid);
-    char *argv[] = { "/system/bin/sh", "-c", cmd, NULL };
-    pid_t pid;
-    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) != 0) { LOGW("network block: spawn failed"); return -1; }
-    LOGI("network %s for uid %d", on ? "blocked" : "unblocked", uid);
+    on = on ? 1 : 0;
+    int k = 0;
+    while (k < g_nnb && g_nb[k].uid != uid) k++;
+    if (k == g_nnb) {
+        if (g_nnb == NB_MAX) { LOGW("network block: more than %d uids", NB_MAX); return -1; }
+        g_nb[g_nnb++] = (nb_t){ .uid = uid, .want = on, .done = -1 };
+    }
+    g_nb[k].want = on;
+    // Asked again with the same state: applied again (the rules don't survive a reboot or an iptables flush)
+    if (!(g_nb_pid > 0 && g_nb_running == k)) g_nb[k].done = -1;
+    nb_next();
     return 0;
 }
 
@@ -376,7 +484,7 @@ static void log_spawn(const char *since) {
     for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) argv[a++] = (char *)tags[i];
     argv[a] = NULL;
     pid_t pid;
-    if (posix_spawn(&pid, argv[0], NULL, NULL, argv, environ) != 0) { LOGW("log capture: spawn failed"); return; }
+    if (spawn_pid(argv, &pid) != 0) { LOGW("log capture: spawn failed"); return; }
     FILE *f = fopen(LOG_PIDF, "we");
     if (f) { fprintf(f, "%d\n", pid); fclose(f); }
     clock_gettime(CLOCK_MONOTONIC, &g_log_started);

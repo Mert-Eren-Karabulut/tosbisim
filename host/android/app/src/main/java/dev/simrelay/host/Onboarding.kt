@@ -99,6 +99,16 @@ object Onboarding {
         if (!started) install = Install.IDLE.also { done() }    // another install still running (it reports itself)
     }
 
+    /**
+     * A failed install from this screen is shown until the module works again: installed from the Magisk app instead,
+     * or a host healthy again. It outranked every other card for the rest of the process (audit, 20 Oct 2026).
+     */
+    fun clearInstallFailure() {
+        if (install != Install.FAILED) return
+        install = Install.IDLE; installError = ""
+        Log.i(TAG, "install failure cleared: the module works again")
+    }
+
     /** Boots since the factory reset (Settings.Global.BOOT_COUNT): unlike wall-clock time, a clock change can't move it. */
     private fun bootCount(ctx: Context) = Settings.Global.getInt(ctx.contentResolver, Settings.Global.BOOT_COUNT, -1)
 
@@ -170,35 +180,52 @@ object Onboarding {
     /** The SMS role (RoleManager: Telephony's getDefaultSmsPackage lags behind it on Android 16, seen 19 Oct). */
     fun smsRole(ctx: Context) = ctx.getSystemService(android.app.role.RoleManager::class.java)
         ?.isRoleHeld(android.app.role.RoleManager.ROLE_SMS) ?: (Telephony.Sms.getDefaultSmsPackage(ctx) == ctx.packageName)
+    /** The default phone app: the host is, from install until Retire (its silent InCallService sees every call). */
+    fun dialerRole(ctx: Context) = runCatching {
+        ctx.getSystemService(android.telecom.TelecomManager::class.java).defaultDialerPackage == ctx.packageName
+    }.getOrDefault(false)
     fun batteryExempt(ctx: Context) = ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
     fun silent(ctx: Context) = Settings.Global.getInt(ctx.contentResolver, "zen_mode", 0) == 2
 
-    /**
-     * Put back what the module sets at boot, now, as root (instead of "restart the phone"): permissions, battery
-     * exemption, SMS role, total silence, Bluetooth on.
-     */
-    @Volatile private var lastHeal = 0L
+    /** Self-repair's schedule per gap: the next try, and the wait after it (10 min, doubling up to [HEAL_MAX_MS]). */
+    private val healAt = HashMap<String, Long>()
+    private val healGap = HashMap<String, Long>()
+    private const val HEAL_FIRST_MS = 10 * 60_000L
+    private const val HEAL_MAX_MS = 4 * 3600_000L
 
     /**
      * A host repairs itself instead of waiting for someone to tap Fix now on a screen nobody looks at: an app update
      * (pm install, as the self-updater does) drops the battery exemption on MIUI until the next restart (Redmi, 20 Oct
-     * 2026), and Android can take a permission or the SMS role away. At most every 10 minutes, only when something is
-     * missing, never while the phone is being given back.
+     * 2026), and Android can take a permission or the SMS role away. Only when something is missing, never while the
+     * phone is being given back; a gap that won't close waits longer each time (10 min, 20, 40 ... up to 4 h): a phone
+     * that refuses one got a root call every 10 minutes for ever (audit, 20 Oct 2026). A closed gap starts again at 10.
      */
-    fun selfHeal(ctx: Context) {
+    @Synchronized fun selfHeal(ctx: Context) {
         if (Retire.running || !Compat.isHostInstalled(ctx)) return
         val now = android.os.SystemClock.elapsedRealtime()
-        if (lastHeal != 0L && now - lastHeal < 10 * 60_000L) return
         val gaps = listOfNotNull(
             "permissions".takeIf { missing(ctx, RUNTIME).isNotEmpty() }, "battery".takeIf { !batteryExempt(ctx) },
             "silence".takeIf { !silent(ctx) }, "sms role".takeIf { !smsRole(ctx) })
-        if (gaps.isEmpty()) return
-        lastHeal = now
-        Log.w(TAG, "self-repair: ${gaps.joinToString()}")
-        fixAll(ctx) {}
+        (healGap.keys - gaps.toSet()).forEach { healGap.remove(it); healAt.remove(it) }
+        val due = gaps.filter { now >= (healAt[it] ?: 0L) }
+        if (due.isEmpty()) return
+        for (g in due) {
+            val gap = healGap[g]?.let { (it * 2).coerceAtMost(HEAL_MAX_MS) } ?: HEAL_FIRST_MS
+            healGap[g] = gap; healAt[g] = now + gap
+        }
+        Log.w(TAG, "self-repair: ${due.joinToString()}")
+        fixAll(ctx, auto = true) {}
     }
 
-    fun fixAll(ctx: Context, done: () -> Unit) {
+    /** The last Fix found root refused: the screen says how to allow it, instead of Fix doing nothing again. */
+    @Volatile var fixRootRefused = false; private set
+
+    /**
+     * Put back what the module sets at boot, now, as root (instead of "restart the phone"): permissions, battery
+     * exemption, SMS role, total silence, Bluetooth on. [auto]: self-repair, whose SMS role request waits on Relay's
+     * backoff (the person's own tap on Fix now doesn't).
+     */
+    fun fixAll(ctx: Context, auto: Boolean = false, done: () -> Unit) {
         if (fixing) return
         fixing = true
         worker.execute {
@@ -209,9 +236,16 @@ object Onboarding {
                     listOf("dumpsys deviceidle whitelist +$pkg", "cmd notification allow_dnd $pkg", "cmd notification set_dnd none") +
                     if (ctx.getSystemService(android.bluetooth.BluetoothManager::class.java).adapter?.isEnabled != true) listOf("svc bluetooth enable") else emptyList()
                 val r = dev.simrelay.host.Root.sh(cmds.joinToString("; "), 30_000)
-                Log.i(TAG, "setup fix applied (${cmds.size} commands, exit ${r.code})")
-                Diag.event("setup_fix", JSONObject().put("what", "fix_all").put("commands", cmds.size).put("exit", r.code), withLog = false)
-                if (!smsRole(ctx)) {
+                fixRootRefused = suFailed(r)
+                Log.i(TAG, "setup fix applied (${cmds.size} commands, exit ${r.code}${if (fixRootRefused) ", root refused" else ""})")
+                Diag.event("setup_fix", JSONObject().put("what", "fix_all").put("commands", cmds.size).put("exit", r.code)
+                    .put("root_refused", fixRootRefused), withLog = false)
+                // The phone app role: Relay's guard keeps it on its own schedule; a tap on Fix now asks at once
+                if (!auto && !dialerRole(ctx)) {
+                    Retire.rememberDialer(ctx, runCatching { ctx.getSystemService(android.telecom.TelecomManager::class.java).defaultDialerPackage }.getOrNull())
+                    Daemon.role("android.app.role.DIALER", pkg)
+                }
+                if (!smsRole(ctx) && (!auto || Relay.smsRoleRequestDue())) {
                     // The role goes through the daemon: done when it answers, so the card doesn't come back meanwhile.
                     waitRole = true
                     Daemon.query("ROLE ${android.app.role.RoleManager.ROLE_SMS} $pkg") { fixing = false; done() }

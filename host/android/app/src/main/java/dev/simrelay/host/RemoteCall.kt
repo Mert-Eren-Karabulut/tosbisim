@@ -81,7 +81,7 @@ object RemoteCall {
                 s.refresh = timers.scheduleWithFixedDelay({ if (s.alive) runCatching { s.turn.refresh() } }, REFRESH_S, REFRESH_S, TimeUnit.SECONDS)
                 Log.i(TAG, "remote audio: relay ${relay.port} bound to iPhone relay in ${System.currentTimeMillis() - t0} ms")
                 answer(RemoteAudio.newBuilder().setRelayIp(relay.address.hostAddress ?: "").setRelayPort(relay.port).build())
-                Thread({ pump(s, crypto) }, "remote-audio").start()
+                Thread({ pump(s, crypto, answer) }, "remote-audio").start()
             } catch (e: Exception) {
                 Log.e(TAG, "remote audio failed: ${e.message ?: e}")
                 runCatching { daemon?.close() }
@@ -91,18 +91,20 @@ object RemoteCall {
         }
     }
 
-    private fun pump(s: Session, crypto: RemoteCrypto) {
-        val out = s.daemon.outputStream
-        s.turn.start { buf, off, len ->
-            val plain = crypto.openAudio(buf.copyOfRange(off, off + len))
-            if (plain == null) { s.bad++; return@start }
-            s.rx++
-            runCatching { out.write(plain) }                      // SEQPACKET: one write = one datagram
-        }
+    private fun pump(s: Session, crypto: RemoteCrypto, answer: (RemoteAudio) -> Unit) {
         var nextLog = System.currentTimeMillis() + 5000
-        val din = s.daemon.inputStream
         val buf = ByteArray(512)
         try {
+            // Inside the try: a close() racing this start makes the streams throw, and on a raw thread that killed the
+            // whole host mid-call (audit, 20 Oct 2026)
+            val out = s.daemon.outputStream
+            s.turn.start { b, off, len ->
+                val plain = crypto.openAudio(b.copyOfRange(off, off + len))
+                if (plain == null) { s.bad++; return@start }
+                s.rx++
+                runCatching { out.write(plain) }                  // SEQPACKET: one write = one datagram
+            }
+            val din = s.daemon.inputStream
             while (s.alive) {
                 val n = din.read(buf)
                 if (n <= 0) break
@@ -114,7 +116,13 @@ object RemoteCall {
         } catch (_: Exception) {
         } finally {
             synchronized(this) { if (session === s) { session = null } }
-            if (s.alive) { s.close(); Log.i(TAG, "remote audio closed (daemon side ended): sent=${s.tx} recv=${s.rx} bad=${s.bad}") }
+            if (s.alive) {
+                s.close()
+                Log.i(TAG, "remote audio closed (daemon side ended): sent=${s.tx} recv=${s.rx} bad=${s.bad}")
+                // Tell the iPhone (usually Bluetooth took the daemon's audio slot): closed silently, its side waited 6 s
+                // for audio, then rebuilt the path and broke the call's Bluetooth audio (20 Oct 2026)
+                answer(RemoteAudio.newBuilder().setClose(true).build())
+            }
         }
     }
 

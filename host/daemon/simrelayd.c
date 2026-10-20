@@ -40,6 +40,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/system_properties.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -121,6 +122,7 @@ static int ctl_read_t(unsigned numid, long long *out, unsigned count, int enumer
 }
 
 // ------------------------------------------------------------------ hardware inventory
+// -1: no mixer, -2: the file couldn't be written (nothing replaced).
 // Every mixer control's description (ELEM_LIST + ELEM_INFO, enum item names): never a value read or write, so it can't
 // disturb the hardware. What the phone's own sound card offers is what lets a family be built and proven from users'
 // phones instead of donor phones (docs/10-proving-voice-paths.md). One line per control:
@@ -140,7 +142,7 @@ static int inventory(const char *path) {
     char tmp[128];
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     FILE *f = fopen(tmp, "we");
-    if (!f) { free(ids); return -1; }
+    if (!f) { free(ids); return -2; }
     static const char *types[] = { "none", "bool", "int", "enum", "bytes", "iec958", "int64" };
     int n = 0;
     for (unsigned i = 0; i < list.used; i++) {
@@ -164,9 +166,11 @@ static int inventory(const char *path) {
         fputc('\n', f);
         n++;
     }
-    fclose(f);
+    // A full disk must not rename a truncated list into place (audit, 20 Oct 2026)
+    int ok = !ferror(f) && fflush(f) == 0;
+    if (fclose(f) != 0) ok = 0;
     free(ids);
-    if (rename(tmp, path) != 0) return -1;
+    if (!ok || rename(tmp, path) != 0) { LOGE("inventory: writing %s failed", tmp); unlink(tmp); return -2; }
     LOGI("inventory: %d controls -> %s", n, path);
     return n;
 }
@@ -194,14 +198,38 @@ static int value_ok(const char *name, const struct snd_ctl_elem_info *in, const 
     return 1;
 }
 
-// Crash breadcrumb: the boot id goes to a file before the first mixer write and is removed 60 s later. Found at start
-// with another boot's id, the phone went down while we were writing: this boot writes nothing (safe mode) and says so
-// in STATUS, so a write that crashes a kernel can't become a reboot loop.
+// Crash breadcrumb: the boot id goes to a file before a mixer write reaches the kernel and is removed CRUMB_LINGER_S
+// after the last one (and on exit). Found at start with another boot's id, the phone went down while we were writing:
+// unless the boot reason says it was an ordinary reboot or shutdown, this boot writes nothing (safe mode) and says so
+// in STATUS, so a write that crashes a kernel can't become a reboot loop. The linger was 60 s and the crumb outlived
+// clean exits: a normal reboot right after a call put the next boot in safe mode, without its silence controls
+// (audit, 20 Oct 2026). A kernel that dies on a write dies within moments of it.
 #define CRUMB "/data/adb/tosbisim/applying"
+#define CRUMB_LINGER_S 5
 #define SAFE_FILE "/data/adb/tosbisim/safe"     // the boot id safe mode belongs to: it lasts the whole boot
 static char g_boot_id[48] = "";
 static int g_safe = 0;
 static struct timespec g_crumb_until;
+
+// The last boot ended in an ordinary reboot/shutdown (not a panic, a watchdog, a hardware reset or anything unknown)?
+// Android's canonical reason ("reboot,userrequested", "shutdown,battery", "kernel_panic", "watchdog,...") comes from
+// bootstat (sys.boot.reason), the bootloader's own from ro.boot.bootreason. Conservative: any crash word, or no reason
+// at all, counts as a crash.
+static int boot_was_normal(char *why, size_t whylen) {
+    char r[PROP_VALUE_MAX] = "";
+    if (__system_property_get("sys.boot.reason", r) <= 0) __system_property_get("ro.boot.bootreason", r);
+    snprintf(why, whylen, "%s", *r ? r : "unknown");
+    if (!*r) return 0;
+    char low[PROP_VALUE_MAX];
+    size_t i = 0;
+    for (; r[i] && i < sizeof(low) - 1; i++) low[i] = (char)(r[i] >= 'A' && r[i] <= 'Z' ? r[i] + 32 : r[i]);
+    low[i] = 0;
+    static const char *crash[] = { "panic", "watchdog", "wdog", "wdt", "crash", "oops", "kernel", "hard", "hw_reset",
+                                   "abnormal", "fault", "bug", "sdi", "ramdump", "unknown", "warm", "reset" };
+    for (size_t k = 0; k < sizeof(crash) / sizeof(crash[0]); k++) if (strstr(low, crash[k])) return 0;
+    return strncmp(low, "reboot", 6) == 0 || strncmp(low, "shutdown", 8) == 0 || strncmp(low, "cold", 4) == 0 ||
+           strstr(low, "userrequested") != NULL;
+}
 
 static void crumb_start(void) {
     int fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY | O_CLOEXEC);
@@ -210,10 +238,15 @@ static void crumb_start(void) {
     fd = open(CRUMB, O_RDONLY | O_CLOEXEC);
     if (fd >= 0) { ssize_t n = read(fd, prev, sizeof(prev) - 1); close(fd); if (n > 0) prev[n] = 0; }
     if (*prev && strcmp(prev, g_boot_id) != 0) {
-        g_safe = 1;
-        LOGE("SAFE MODE: the last boot ended while audio controls were being written; none are written this boot");
-        fd = open(SAFE_FILE, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
-        if (fd >= 0) { (void)!write(fd, g_boot_id, strlen(g_boot_id)); close(fd); }
+        char why[PROP_VALUE_MAX + 8];
+        if (boot_was_normal(why, sizeof(why))) {
+            LOGW("the last boot ended while audio controls were being written, but by an ordinary '%s': not safe mode", why);
+        } else {
+            g_safe = 1;
+            LOGE("SAFE MODE: the last boot ended ('%s') while audio controls were being written; none are written this boot", why);
+            fd = open(SAFE_FILE, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+            if (fd >= 0) { (void)!write(fd, g_boot_id, strlen(g_boot_id)); close(fd); }
+        }
     }
     unlink(CRUMB);
     char safe[48] = "";                          // a restart within the same boot stays safe
@@ -231,24 +264,29 @@ static void crumb_arm(void) {
         int fd = open(CRUMB, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
         if (fd >= 0) { (void)!write(fd, g_boot_id, strlen(g_boot_id)); fsync(fd); close(fd); }
     }
-    g_crumb_until.tv_sec = now.tv_sec + 60;
+    g_crumb_until.tv_sec = now.tv_sec + CRUMB_LINGER_S;
+    g_crumb_until.tv_nsec = now.tv_nsec;
 }
+
+static void crumb_clear(void) { if (g_crumb_until.tv_sec) unlink(CRUMB); g_crumb_until.tv_sec = 0; }
 
 // ms until the breadcrumb is due to go (for poll), -1 if none
 static int crumb_tick(void) {
     if (g_crumb_until.tv_sec == 0) return -1;
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    if (now.tv_sec >= g_crumb_until.tv_sec) { unlink(CRUMB); g_crumb_until.tv_sec = 0; return -1; }
-    return (int)(g_crumb_until.tv_sec - now.tv_sec) * 1000;
+    long long ms = (g_crumb_until.tv_sec - now.tv_sec) * 1000LL + (g_crumb_until.tv_nsec - now.tv_nsec) / 1000000;
+    if (ms <= 0) { crumb_clear(); return -1; }
+    return (int)ms;
 }
 
 static int ctl_write_value(managed_t *m, struct snd_ctl_elem_value *v) {
     if (g_safe) return -1;
-    crumb_arm();
     v->id.numid = m->numid;
     clock_gettime(CLOCK_MONOTONIC, &m->last_write);
-    if (g_ctl < 0 || ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_WRITE, v) < 0) {
+    if (g_ctl < 0) { LOGE("write '%s': no mixer", m->name); return -1; }
+    crumb_arm();                                 // only a write that really goes to the kernel
+    if (ioctl(g_ctl, SNDRV_CTL_IOCTL_ELEM_WRITE, v) < 0) {
         LOGE("write '%s' failed: %s", m->name, strerror(errno));
         return -1;
     }
@@ -278,7 +316,7 @@ static void ctl_restore(managed_t *m) {
 static void ctl_set_by_name(const char *name, const long long *vals, int n) {
     struct snd_ctl_elem_info info;
     if (!*name || ctl_info(name, &info) < 0) return;
-    managed_t tmp = { .numid = info.id.numid, .info = info };
+    managed_t tmp = { .numid = info.id.numid, .info = info, .enumerated = info.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED };
     strncpy(tmp.name, name, NAME_LEN - 1);
     if (ctl_write(&tmp, vals, n) == 0) LOGI("set '%s' (%lld ...)", name, vals[0]);
 }
@@ -370,9 +408,78 @@ static int silence_add(const char *spec) {
     return manage_in(g_perm, &g_np, name, &v, 1, 0) ? 0 : -1;
 }
 
+// A call's originals on disk: they lived only in memory, so a daemon killed mid-call (crash, SIGKILL, OOM) left the
+// profile's call controls in call state until reboot (audit, 20 Oct 2026). Written when a call applies them, removed
+// when they are restored; found at start (same boot only), they are put back. One control per line,
+// "<name>\t<v1>,<v2>...", after a "boot <id>" line; a line without its newline (cut short) is ignored.
+#define CALL_ORIG "/data/adb/tosbisim/call-originals"
+
+static void call_orig_save(void) {
+    FILE *f = fopen(CALL_ORIG ".tmp", "we");
+    if (!f) { LOGW("save " CALL_ORIG ": %s", strerror(errno)); return; }
+    fprintf(f, "boot %.*s\n", (int)strcspn(g_boot_id, "\n"), g_boot_id);
+    int n = 0;
+    for (int i = 0; i < g_nm; i++) {
+        managed_t *m = &g_m[i];
+        if (m->write_only || !m->have_orig) continue;
+        unsigned c = m->count < MAX_VALUES ? m->count : MAX_VALUES;
+        fprintf(f, "%s\t", m->name);
+        for (unsigned k = 0; k < c; k++)
+            fprintf(f, "%s%lld", k ? "," : "", m->enumerated ? (long long)m->orig.value.enumerated.item[k] : m->orig.value.integer.value[k]);
+        fputc('\n', f);
+        n++;
+    }
+    int ok = !ferror(f) && fflush(f) == 0 && fsync(fileno(f)) == 0;
+    if (fclose(f) != 0) ok = 0;
+    if (!ok || n == 0 || rename(CALL_ORIG ".tmp", CALL_ORIG) != 0) {
+        if (!ok) LOGW("save " CALL_ORIG " failed");
+        unlink(CALL_ORIG ".tmp");
+    }
+}
+
+// Start-up (not in safe mode): a previous run died mid-call. Each value goes through ctl_write's value_ok check.
+static void call_orig_restore(void) {
+    FILE *f = fopen(CALL_ORIG, "re");
+    if (!f) return;
+    char line[256], boot[64];
+    snprintf(boot, sizeof(boot), "boot %.*s\n", (int)strcspn(g_boot_id, "\n"), g_boot_id);
+    if (!fgets(line, sizeof(line), f) || strcmp(line, boot) != 0) {
+        LOGI("call originals from another boot: dropped");    // a reboot has put every control back already
+    } else {
+        // Every line first, then restored last to first (the order restore_all uses)
+        char names[MAX_MANAGED][NAME_LEN];
+        long long vals[MAX_MANAGED][MAX_VALUES];
+        int nv[MAX_MANAGED], n = 0;
+        while (n < MAX_MANAGED && fgets(line, sizeof(line), f)) {
+            size_t len = strlen(line);
+            if (len == 0 || line[len - 1] != '\n') break;            // cut short: the file ends here
+            line[len - 1] = 0;
+            char *tab = strrchr(line, '\t');
+            if (!tab || tab == line || (size_t)(tab - line) >= NAME_LEN) continue;
+            *tab = 0;
+            int k = 0, bad = 0;
+            for (char *q = tab + 1; *q && k < MAX_VALUES; ) {
+                char *end;
+                vals[n][k++] = strtoll(q, &end, 10);
+                if (end == q || (*end && *end != ',')) { bad = 1; break; }
+                if (!*end) break;
+                q = end + 1;
+            }
+            if (bad || k == 0) continue;
+            snprintf(names[n], NAME_LEN, "%s", line);
+            nv[n++] = k;
+        }
+        LOGW("a previous run died mid-call: restoring %d call control(s)", n);
+        for (int i = n - 1; i >= 0; i--) ctl_set_by_name(names[i], vals[i], nv[i]);
+    }
+    fclose(f);
+    unlink(CALL_ORIG);
+}
+
 static void restore_all(const char *why) {
     audio_call_end();
-    for (int i = 0; i < g_nm; i++) {
+    // Last to first: a control managed twice (a call control naming a route control too) ends at its first original
+    for (int i = g_nm - 1; i >= 0; i--) {
         managed_t *m = &g_m[i];
         if (m->write_only) {
             long long off[3] = { 0, p.vsid, p.ramp };
@@ -386,6 +493,7 @@ static void restore_all(const char *why) {
     g_call = 0;
     g_session = 0;
     clear_device_mutes();
+    if (g_ctl >= 0 && !g_safe) unlink(CALL_ORIG);   // restored (in safe mode nothing was, nor could be)
 }
 
 static int call_start(int session) {
@@ -411,6 +519,7 @@ static int call_start(int session) {
                        .capture_channels = p.capture_channels, .inject_pcm = p.inject_pcm,
                        .inject_rate = p.inject_rate, .inject_channels = p.inject_channels, .loopback = p.loopback };
     audio_call_begin(&ac);
+    call_orig_save();                            // after the audio starts: the file's fsync must not delay it
     LOGI("CALL_START session=%d: %d controls applied", session, applied);
     return applied;
 }
@@ -580,10 +689,13 @@ static void handle_line(int fd, char *line) {
     if (strcmp(cmd, "HELLO") == 0) {
         reply(fd, "OK simrelayd %s card=%d call=%d session=%d", VERSION, g_card, g_call, g_session);
     } else if (strcmp(cmd, "STATUS") == 0) {
+        // Whole names only, until the buffer is full (strncat's size arithmetic overflowed it once full; audit, 20 Oct 2026)
         char names[1800] = "";
+        size_t used = 0;
         for (int i = 0; i < g_nm; i++) {
-            strncat(names, g_m[i].name, sizeof(names) - strlen(names) - 2);
-            strncat(names, ";", sizeof(names) - strlen(names) - 1);
+            int w = snprintf(names + used, sizeof(names) - used, "%s;", g_m[i].name);
+            if (w < 0 || (size_t)w >= sizeof(names) - used) { names[used] = 0; break; }
+            used += (size_t)w;
         }
         reply(fd, "OK call=%d session=%d managed=%d silence=%d safe=%d %s", g_call, g_session, g_nm, g_np, g_safe, names);
     } else if (strcmp(cmd, "SET") == 0) {
@@ -610,8 +722,12 @@ static void handle_line(int fd, char *line) {
         restore_all("CALL_END");
         reply(fd, "OK");
     } else if (strcmp(cmd, "INVENTORY") == 0) {         // read-only: every control's description, to a root-only file
+        // Not during a call: hundreds of ioctls on the mixer the call's routing and re-applies are using
+        if (g_call) { reply(fd, "ERR in call"); return; }
         int n = inventory(INVENTORY_FILE);
-        if (n < 0) reply(fd, "ERR no mixer"); else reply(fd, "OK %d controls in " INVENTORY_FILE, n);
+        if (n == -1) reply(fd, "ERR no mixer");
+        else if (n < 0) reply(fd, "ERR write failed");
+        else reply(fd, "OK %d controls in " INVENTORY_FILE, n);
     } else if (strcmp(cmd, "HAS") == 0) {               // does this mixer control exist? (auto profiles)
         char *name = strtok(NULL, "");
         struct snd_ctl_elem_info info;
@@ -671,9 +787,11 @@ typedef struct { int fd; int owner; size_t used; char buf[1024]; } conn_t;
 
 static void conn_close(conn_t *c) { if (c->fd >= 0) close(c->fd); c->fd = -1; c->used = 0; }
 
-// Read what's there and run its lines; 0 when the peer has gone.
+// Read what's there and run its lines; 0 when the peer has gone. Never blocks: a client whose readiness was stale
+// (POLLHUP, a replaced slot) must not stall the main loop (audit, 20 Oct 2026).
 static int conn_read(conn_t *c) {
-    ssize_t n = read(c->fd, c->buf + c->used, sizeof(c->buf) - 1 - c->used);
+    ssize_t n = recv(c->fd, c->buf + c->used, sizeof(c->buf) - 1 - c->used, MSG_DONTWAIT);
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return 1;   // nothing yet
     if (n <= 0) return 0;
     c->used += (size_t)n;
     c->buf[c->used] = 0;
@@ -723,14 +841,30 @@ static int run_client(const char *script) {
 
 // SIGTERM/SIGINT: stop and give the phone its sound back (module disabled or removed). SIGUSR1: restart for an update
 // (Updater.kt): the silence controls and the charge cut stay held, the new daemon takes them over at once.
+// These signals are blocked except inside the main loop's ppoll: one arriving between the g_stop check and the wait
+// would otherwise sleep through to the 10 min timeout (audit, 20 Oct 2026). SIGCHLD only wakes the loop (the
+// network-block queue starts its next script). Threads inherit the mask, so these all reach the main thread there.
+// An update restart exits EXIT_UPDATE: service.sh then leaves the charge cut held for the new daemon.
+#define EXIT_UPDATE 10
 static volatile sig_atomic_t g_keep_silence = 0;
 static void on_signal(int sig) { if (sig == SIGUSR1) g_keep_silence = 1; g_stop = 1; }
+static void on_child(int sig) { (void)sig; }
+
+// --uid: digits only. atoi("") is 0, which made root the owner when service.sh found no app uid (audit, 20 Oct 2026).
+static int parse_uid(const char *s, uid_t *out) {
+    if (!s || !*s || strlen(s) > 9) return -1;
+    for (const char *c = s; *c; c++) if (*c < '0' || *c > '9') return -1;
+    *out = (uid_t)strtoul(s, NULL, 10);
+    return 0;
+}
 
 int main(int argc, char **argv) {
     int card_given = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--client") == 0 && i + 1 < argc) return run_client(argv[i + 1]);
-        if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) g_allowed_uid = (uid_t)atoi(argv[++i]);
+        if (strcmp(argv[i], "--uid") == 0 && i + 1 < argc) {
+            if (parse_uid(argv[++i], &g_allowed_uid) < 0) { LOGE("--uid '%s' is not a uid: root only", argv[i]); g_allowed_uid = (uid_t)-1; }
+        }
         else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) { g_card = atoi(argv[++i]); card_given = 1; }
         else if (strcmp(argv[i], "--loopback") == 0) p.loopback = 1;
         else if (strcmp(argv[i], "--safe") == 0) { g_safe = 1; LOGE("SAFE MODE: started after repeated failures; no mixer writes"); }
@@ -758,17 +892,25 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    sigset_t block, waitmask;
+    sigemptyset(&block);
+    sigaddset(&block, SIGTERM); sigaddset(&block, SIGINT); sigaddset(&block, SIGUSR1); sigaddset(&block, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &block, &waitmask);
+    sigdelset(&waitmask, SIGTERM); sigdelset(&waitmask, SIGINT); sigdelset(&waitmask, SIGUSR1); sigdelset(&waitmask, SIGCHLD);
     struct sigaction sa = { .sa_handler = on_signal };
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGUSR1, &sa, NULL);
+    // SIGCHLD gets a handler, never SIG_IGN: the loop reaps fire-and-forget children (the network-block script, am
+    // broadcasts) and ignoring SIGCHLD made waitpid lose exit codes. Children start with an empty mask (box.c spawn).
+    struct sigaction sc = { .sa_handler = on_child };
+    sigaction(SIGCHLD, &sc, NULL);
     signal(SIGPIPE, SIG_IGN);
-    // SIGCHLD stays default: the loop reaps fire-and-forget children (the network-block script, am broadcasts);
-    // ignoring SIGCHLD made waitpid lose exit codes.
 
     box_charge_init();         // first: a previous run may have died while cutting the charge (the battery would drain)
     crumb_start();             // before any mixer write: did the last boot end while we were writing?
     clear_device_mutes();      // a previous run may have died mid-call
+    if (!g_safe) call_orig_restore();   // ... and left its call controls in call state
     audio_init((int)g_allowed_uid);
     box_keys_open();
     int uev = box_uevent_open();
@@ -777,6 +919,11 @@ int main(int argc, char **argv) {
     LOGI("simrelayd %s up: card %d, socket @%s, allowed uid %d", VERSION, g_card, SOCK_NAME, (int)g_allowed_uid);
 
     static conn_t conns[2] = { { .fd = -1, .owner = 1 }, { .fd = -1, .owner = 0 } };   // the app's, a root tool's
+    // 10 min heartbeat: re-check the charge limit even if a phone sends no battery uevents. Kept on its own clock: the
+    // crumb's shorter timeouts used to stand in for it, and a crumb kept alive by a call skipped it (audit, 20 Oct 2026).
+    struct timespec now, heartbeat;
+    clock_gettime(CLOCK_MONOTONIC, &heartbeat);
+    heartbeat.tv_sec += 600;
     while (!g_stop) {
         struct pollfd fds[5 + BOX_MAX_KEYDEVS] = {
             { .fd = ls, .events = POLLIN }, { .fd = g_ctl, .events = POLLIN }, { .fd = conns[0].fd, .events = POLLIN },
@@ -784,14 +931,18 @@ int main(int argc, char **argv) {
         };
         int nk = box_key_count();
         for (int i = 0; i < nk; i++) fds[5 + i] = (struct pollfd){ .fd = box_key_fd(i), .events = POLLIN };
-        // 10 min heartbeat: re-check the charge limit even if a phone sends no battery uevents.
         box_reap();
         box_log_watch();
         box_power_check();
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec >= heartbeat.tv_sec) { box_charge_check(); heartbeat.tv_sec = now.tv_sec + 600; }
+        long long wait_ms = (heartbeat.tv_sec - now.tv_sec) * 1000LL;
         int crumb = crumb_tick();
-        int pr = poll(fds, (nfds_t)(5 + nk), crumb >= 0 && crumb < 600000 ? crumb + 50 : 600000);
-        if (pr < 0) { if (errno == EINTR) continue; break; }
-        if (pr == 0) { if (crumb < 0) box_charge_check(); continue; }
+        if (crumb >= 0 && crumb + 50 < wait_ms) wait_ms = crumb + 50;
+        struct timespec to = { .tv_sec = (time_t)(wait_ms / 1000), .tv_nsec = (long)(wait_ms % 1000) * 1000000L };
+        int pr = ppoll(fds, (nfds_t)(5 + nk), &to, &waitmask);
+        if (pr < 0) { if (errno == EINTR) continue; LOGE("poll: %s", strerror(errno)); break; }
+        if (pr == 0) continue;
 
         // A device that went away polls ready for ever (an audio DSP restart re-registers the sound card): the mixer's
         // ids are stale too, so start over (the module restarts us, the app re-sends its profile); a vanished key
@@ -823,7 +974,9 @@ int main(int argc, char **argv) {
 
         for (int k = 0; k < 2; k++) {
             conn_t *c = &conns[k];
-            if (c->fd < 0 || !(fds[k == 0 ? 2 : 4].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+            struct pollfd *pf = &fds[k == 0 ? 2 : 4];
+            // A slot replaced above holds a new fd: the old one's readiness says nothing about it (fd numbers are reused)
+            if (c->fd < 0 || pf->fd != c->fd || !(pf->revents & (POLLIN | POLLHUP | POLLERR))) continue;
             if (conn_read(c)) continue;
             LOGI("%s gone", c->owner ? "client" : "tool client");
             if (c->owner && g_call) restore_all("client disconnected mid-call");
@@ -842,6 +995,8 @@ int main(int argc, char **argv) {
         }
     }
     audio_shutdown();
+    crumb_clear();             // every write is done: a reboot from here on is no crash of ours
+    if (g_keep_silence && g_exit_code == 0) g_exit_code = EXIT_UPDATE;
     LOGI("simrelayd stopped");
     return g_exit_code;
 }

@@ -25,13 +25,13 @@
     <string name="unlock_pixel">Pixel: in fastboot, run \"fastboot flashing unlock\". Carrier (Verizon) Pixels can\'t be unlocked.</string>
     <string name="unlock_code">Your maker gives an unlock code on its website (Motorola, Sony); then run the fastboot command it shows.</string>
     <string name="unlock_other">Then, in fastboot, run \"fastboot flashing unlock\".</string>
-    <string name="unlock_erase">Unlocking erases everything on the phone, this app too: keep the TosbiSim Host app file to install it again afterwards.</string>
+    <string name="unlock_erase">Unlocking erases everything on the phone. Afterwards root it with Magisk and install TosbiSim-Host-Magisk.zip in Magisk → Modules.</string>
     <string name="unlock_cant">This phone reports that its bootloader can\'t be unlocked.</string>
     <string name="btn_dev_options">Open Developer options</string>
 
     <!-- root -->
     <string name="root_title">Root the phone with Magisk</string>
-    <string name="root_body">Install the Magisk app, patch this phone\'s boot image with it and flash the patched image (Samsung: with Odin). Magisk\'s guide explains each phone type. Then come back and tap Check root.</string>
+    <string name="root_body">Install the Magisk app, patch this phone\'s boot image with it and flash the patched image (Samsung: with Odin). Magisk\'s guide explains each phone type. Then install TosbiSim-Host-Magisk.zip in Magisk → Modules and restart the phone.</string>
     <string name="root_checking">Checking root… if Magisk asks, tap Grant.</string>
     <string name="root_no_su">No root found yet: install Magisk first (see its guide).</string>
     <string name="root_timeout">Magisk didn\'t answer. Tap Check root again and tap Grant when Magisk asks.</string>
@@ -40,8 +40,8 @@
     <string name="btn_magisk_guide">Open the Magisk guide</string>
 
     <!-- module -->
-    <string name="install_title">Install the TosbiSim module</string>
-    <string name="install_body">Root works. This installs TosbiSim\'s Magisk module: the background service, its permissions and the silence settings. The phone restarts once.</string>
+    <string name="install_title">Install the TosbiSim Host module</string>
+    <string name="install_body">Root works. In the Magisk app, open Modules → Install from storage, choose TosbiSim-Host-Magisk.zip (from tosbisim.com) and restart the phone. TosbiSim starts by itself and this screen continues from there.</string>
     <string name="btn_install">Install</string>
     <string name="btn_installing">Installing…</string>
     <string name="install_failed_title">The install didn\'t finish</string>
@@ -51,9 +51,9 @@
     <string name="restart_body">The module is installed. Restart the phone: TosbiSim starts by itself and this screen continues from here.</string>
     <string name="btn_restart">Restart now</string>
     <string name="inactive_title">The module isn\'t active</string>
-    <string name="inactive_disabled">It is turned off in Magisk → Modules. Turn it on there and restart.</string>
-    <string name="inactive_removing">Magisk is set to remove it. Install it again.</string>
-    <string name="inactive_none">It isn\'t installed any more. Install it again.</string>
+    <string name="inactive_disabled">It is turned off in Magisk → Modules. Turn it on there, then restart the phone.</string>
+    <string name="inactive_removing">Magisk is set to remove it at the next restart. To keep TosbiSim, install TosbiSim-Host-Magisk.zip in Magisk → Modules again, then restart.</string>
+    <string name="inactive_none">It isn\'t installed any more. Install TosbiSim-Host-Magisk.zip in Magisk → Modules, then restart.</string>
     <string name="inactive_pending">It is installed and waits for a restart.</string>
     <string name="inactive_other">The phone restarted but TosbiSim didn\'t start as a system app. Reinstall the module; if that doesn\'t help, send a report below.</string>
     <string name="btn_reinstall">Reinstall the module</string>
@@ -78,7 +78,7 @@
     <string name="lock_on">PIN, pattern or password set: TosbiSim can\'t start after a restart until someone unlocks this phone</string>
     <string name="lock_off">None: TosbiSim starts by itself after a restart</string>
     <string name="lock_title">Remove the screen lock</string>
-    <string name="lock_body">With a PIN, pattern or password, Android keeps TosbiSim locked after every restart or power cut until someone unlocks the phone, and on a phone kept in a drawer nobody will. Set the screen lock to None (or Swipe).</string>
+    <string name="lock_body">With a PIN, pattern or password, Android keeps TosbiSim locked after every restart or power cut until someone unlocks the phone, and nobody will on a phone in your bag or left at home. Set the screen lock to None (or Swipe).</string>
     <string name="btn_lock_settings">Open screen lock settings</string>
     <string name="pair_ready">Ready to pair: the first iPhone that adds this host gets it.</string>
     <string name="btn_open_pairing">Open pairing (5 min)</string>
@@ -91,7 +91,7 @@
     <string name="sim_body">No SIM found. Insert one (check it is seated well); TosbiSim picks it up by itself.</string>
     <string name="sim_locked">SIM %d is locked: enter its PIN in TosbiSim on the iPhone (Host → SIM).</string>
     <string name="done_title">This phone is set up</string>
-    <string name="done_body">Keep it charging and put it away. To see this screen again, press Volume Up 3 times, then Volume Down 3 times.</string>
+    <string name="done_body">Keep it charged and take it with you (a bag is fine) or leave it at home. To see this screen again, press Volume Up 3 times, then Volume Down 3 times.</string>
     <string name="btn_pair_other">Pair a different iPhone…</string>
     <string name="pair_other_confirm">%1$s stays paired until another iPhone connects in the next 5 minutes; that one then replaces it. Continue?</string>
     <string name="btn_continue">Continue</string>
@@ -119,7 +119,7 @@
     <string name="module_active">Active</string>
     <string name="module_missing">Not installed</string>
     <string name="c_service">Background service</string>
-    <string name="service_ok">Running (%s)</string>
+    <string name="service_ok">Running</string>
     <string name="service_down">Not running</string>
     <string name="c_permissions">Permissions and roles</string>
     <string name="perm_ok">Phone, SMS, Bluetooth; default phone and SMS app; never put to sleep; total silence</string>
@@ -164,10 +164,47 @@
     <string name="retire_note">Gives the phone back for normal use: its sounds, vibration, screen and buttons, its own phone and messaging apps and Wi-Fi come back, your iPhone forgets it, and TosbiSim is removed. The phone restarts at the end. Magisk and the unlocked bootloader stay.</string>
     <string name="retire_btn">Stop using as a host…</string>
     <string name="retire_confirm_title">Remove TosbiSim from this phone?</string>
-    <string name="retire_confirm_body">Your iPhone will stop getting this SIM\'s calls and messages. To use the phone as a host again later, install TosbiSim and pair it again.\n\nMagisk (root) and the unlocked bootloader stay: they were set up before TosbiSim. To make the phone fully stock, uninstall Magisk from its own app afterwards.</string>
+    <string name="retire_confirm_body">Your iPhone will stop getting this SIM\'s calls and messages. To use the phone as a host again later, install TosbiSim-Host-Magisk.zip in Magisk → Modules and pair it again.\n\nMagisk (root) and the unlocked bootloader stay: they were set up before TosbiSim. To make the phone fully stock, uninstall Magisk from its own app afterwards.</string>
     <string name="retire_confirm_yes">Remove and restart</string>
     <string name="retire_step_iphone">Telling your iPhone…</string>
     <string name="retire_step_settings">Giving back the phone\'s settings…</string>
     <string name="retire_step_restart">Removing TosbiSim. The phone restarts in a moment.</string>
-    <string name="retire_failed">Couldn\'t remove TosbiSim (root was refused). Open Magisk, remove the TosbiSim Host module and restart.</string>
+    <string name="retire_failed">Couldn\'t start the removal, so this phone is a host again, as before. Try again; if it keeps failing, open Magisk → Modules, remove TosbiSim Host and restart the phone.</string>
+    <!-- audit, 20 Oct 2026 -->
+    <string name="install_busy_body">Installing TosbiSim\'s Magisk module from this app: the background service, its permissions and the silence settings. The phone then restarts once.</string>
+    <string name="btn_open_magisk">Open Magisk</string>
+    <string name="btn_install_here">Install from this app instead</string>
+    <string name="btn_close">Close</string>
+    <string name="fix_dialer">Another app is the default phone app.</string>
+    <string name="fix_root_refused">Root refused: Magisk → Superuser → allow TosbiSim Host, then tap Fix now.</string>
+    <string name="perm_phone">phone</string>
+    <string name="perm_sms">SMS</string>
+    <string name="perm_bluetooth">Bluetooth</string>
+    <string name="perm_notifications">notifications</string>
+    <string name="perm_phone_control">phone control</string>
+    <string name="perm_settings">system settings</string>
+    <string name="perm_call_screen">call screen</string>
+    <string name="perm_hotspot">hotspot</string>
+    <string name="perm_other">others</string>
+    <string name="sim_locked_title">Unlock the SIM</string>
+    <string name="sim_locked_puk">SIM %d is blocked: enter its PUK code (on the SIM\'s card, or from your operator) and a new PIN in TosbiSim on the iPhone (Host → SIM).</string>
+    <string name="sim_locked_carrier">This phone is locked to another carrier and refuses SIM %d. That can\'t be unlocked from the iPhone: ask the carrier the phone came from to unlock it, or use one of its SIMs.</string>
+    <string name="sim_locked_perm">SIM %d is blocked for good (too many wrong PUK codes). Ask your operator for a new SIM.</string>
+    <string name="sim_perm_disabled">blocked for good</string>
+    <string name="sim_off_title">The SIM is switched off</string>
+    <string name="sim_switched_off">Switch it on in TosbiSim on the iPhone (Host → SIM): calls and texts can\'t arrive meanwhile.</string>
+    <string name="box_on_plain">On</string>
+    <string name="box_paused">Paused until %s (the button gesture); back on when the screen goes off after that</string>
+    <string name="pair_open_minutes">Pairing is open for about %d min.</string>
+    <string name="report_refused">The server didn\'t take the report. Try again later.</string>
+    <string name="mark_done">done</string>
+    <string name="mark_todo">to do</string>
+    <string name="mark_problem">problem</string>
+    <string name="mark_wait">in progress</string>
+    <string name="retire_step_check">Checking root…</string>
+    <string name="retire_in_call">A call is on, so nothing was changed. Try again once it has ended.</string>
+    <string name="retire_no_root">Root was refused, so nothing was changed. In Magisk → Superuser, allow TosbiSim Host, then try again.</string>
+    <string name="retire_prepare_failed">Couldn\'t prepare the removal, so nothing was changed. Try again; if it keeps failing, send a report below.</string>
+    <string name="retire_unpaired">Your iPhone was already told and forgot this host: to keep using it, add it again on the iPhone (Add host).</string>
+    <string name="retire_failed_title">TosbiSim wasn\'t removed</string>
 </resources>

@@ -14,7 +14,7 @@ import java.util.concurrent.Executors
  * with the phone's model/firmware facts and a scrubbed excerpt of the host log ([Scrub]: no phone numbers, hardware
  * or IP addresses, ids, network names or message text ever leave the phone). On by default, explained on the setup
  * screen, one switch to turn it off. Queued on disk while offline; at most [PER_DAY] a day, the same event at most
- * once every [REPEAT_MS].
+ * once every [REPEAT_MS]. The hardware inventory's parts ("dump", once per firmware) don't count towards the day.
  */
 object Diag {
     private const val TAG = "SimRelayHost"
@@ -59,8 +59,11 @@ object Diag {
         if (!force && kind == "event" && now - p.getLong("last_$key", 0) < REPEAT_MS) return@execute   // force: the user asked
         val day = now / 86_400_000L
         val sentToday = if (p.getLong("day", -1) == day) p.getInt("today", 0) else 0
-        if (sentToday >= PER_DAY) return@execute
-        p.edit().putLong("last_$key", now).putLong("day", day).putInt("today", sentToday + 1).apply()
+        // An inventory's parts belong together: a cap reached half-way would leave a dump that never decodes (audit,
+        // 20 Oct 2026). They come once per firmware, so they don't count.
+        val dump = kind == "dump"
+        if (!dump && sentToday >= PER_DAY) return@execute
+        p.edit().putLong("last_$key", now).putLong("day", day).putInt("today", sentToday + if (dump) 0 else 1).apply()
         val body = facts(kind).put("payload", JSONObject()
             .put("event", name).put("detail", detail)
             .put("android", Build.VERSION.RELEASE)
@@ -102,18 +105,66 @@ object Diag {
         return Scrub.text(raw.takeLast(bytes))
     }
 
-    /** Send what's queued (oldest first); kept on failure for the next try. */
     /** Our own test emulators (tools/rig/emulator.sh) must not count as people's phones; adb can allow them. */
     private val emulator = Build.HARDWARE in setOf("ranchu", "goldfish") || Build.FINGERPRINT.contains("sdk_gphone")
 
+    /** What the server can never take: a 4xx other than "timeout" (408) and "too many" (429). Anything else, and no
+     *  answer at all, may work later. */
+    private fun refused(code: Int) = code in 400..499 && code != 408 && code != 429
+
+    /**
+     * Send what's queued (oldest first); kept on failure for the next try. A report the server refuses is dropped:
+     * kept, it blocked every report behind it for ever (audit, 20 Oct 2026). With diagnostics off only the user's own
+     * "Send a report now" leaves the phone.
+     */
     private fun flush() {
         if (emulator && !prefs().getBoolean("emulator_ok", false)) { dir().listFiles()?.forEach { it.delete() }; return }
-        if (!enabled) { dir().listFiles()?.filter { it.name.startsWith("q-") }?.forEach { it.delete() }; return }
-        for (f in dir().listFiles()?.filter { it.name.startsWith("q-") }?.sortedBy { it.name }.orEmpty()) {
+        val queued = dir().listFiles()?.filter { it.name.startsWith("q-") }?.sortedBy { it.name }.orEmpty()
+        val on = enabled
+        for (f in queued) {
+            if (!on && !f.name.endsWith(USER_REPORT)) { f.delete(); continue }
             val body = runCatching { JSONObject(f.readText()) }.getOrNull()
             if (body == null) { f.delete(); continue }
-            if (Api.postJson("/reports", body) == null) return               // offline: try again on the next event
+            val code = Api.postStatus("/reports", body).first
+            if (code in 200..299) { f.delete(); continue }
+            if (!refused(code)) return                                      // offline: try again on the next event
+            Log.w(TAG, "diag: ${f.name} refused by the server (HTTP $code), dropped")
             f.delete()
+        }
+    }
+
+    private const val USER_REPORT = "-user_report.json"
+
+    /** The user's "Send a report now", for the screen: process-level, so a rotation keeps it. */
+    enum class Report { IDLE, SENDING, SENT, QUEUED, REFUSED }
+    @Volatile var report = Report.IDLE; private set
+
+    /**
+     * "Send a report now": the user asked, so it goes even with diagnostics off and past the daily cap, and the screen
+     * says honestly whether it went (it claimed "sent" while diagnostics were off and nothing left the phone; audit,
+     * 20 Oct 2026). Offline: queued, it goes out with the next event or connectivity. [done] runs on the diag thread.
+     */
+    fun userReport(detail: JSONObject, done: () -> Unit = {}) {
+        if (report == Report.SENDING) return
+        report = Report.SENDING
+        exec.execute {
+            try {
+                if (emulator && !prefs().getBoolean("emulator_ok", false)) { report = Report.REFUSED; return@execute }
+                val now = System.currentTimeMillis()
+                val body = facts("event").put("payload", JSONObject()
+                    .put("event", "user_report").put("detail", detail)
+                    .put("android", Build.VERSION.RELEASE).put("log", recentLog(LOG_BYTES)))
+                val code = Api.postStatus("/reports", body).first
+                report = when {
+                    code in 200..299 -> Report.SENT
+                    refused(code) -> Report.REFUSED.also { Log.w(TAG, "diag: user report refused (HTTP $code)") }
+                    else -> { File(dir(), "q-$now$USER_REPORT").writeText(body.toString()); Report.QUEUED }
+                }
+                if (report == Report.SENT) flush()
+            } finally {
+                if (report == Report.SENDING) report = Report.REFUSED          // something threw: let them try again
+                done()
+            }
         }
     }
 

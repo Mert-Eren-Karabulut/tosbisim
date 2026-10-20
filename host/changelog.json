@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.7",
+    "code": 43,
+    "en": "Calls that start while your iPhone is reconnecting no longer go silent half-way: when Bluetooth comes back, the call's audio moves to it cleanly.\nSafer and sturdier: a restart right after a call no longer leaves the host unprotected; call audio settings are put back even if the background service is stopped mid-call; one rejected report can no longer block diagnostics.\n\"Stop using this phone as a host\" checks everything first and puts the host back as it was if it can't finish; it waits until a call is over.\nClearer setup screen: Magisk-zip instructions, PUK and carrier-lock messages, box mode \"paused until\", better contrast and screen-reader support.\nThe charge limit holds even if the phone switches charging back on by itself.",
+    "tr": "iPhone'unuz yeniden bağlanırken başlayan aramalar artık yarı yolda sessizleşmiyor: Bluetooth geri gelince arama sesi temiz bir şekilde ona geçiyor.\nDaha güvenli ve sağlam: bir aramanın hemen ardından yeniden başlatma artık ana cihazı korumasız bırakmıyor; arka plan hizmeti arama sırasında durdurulsa bile arama sesi ayarları geri alınıyor; reddedilen tek bir rapor artık tanılamayı engelleyemiyor.\n\"Bu telefonu ana cihaz olarak kullanmayı bırak\" önce her şeyi kontrol ediyor, bitiremezse ana cihazı eski hâline getiriyor; arama bitene kadar bekliyor.\nDaha anlaşılır kurulum ekranı: Magisk zip talimatları, PUK ve operatör kilidi mesajları, kutu modu \"şu saate kadar duraklatıldı\", daha iyi kontrast ve ekran okuyucu desteği.\nŞarj sınırı, telefon şarjı kendiliğinden yeniden açsa bile korunuyor."
+  },
+  {
     "version": "0.12.6",
     "code": 42,
     "en": "Installing is now one step: the TosbiSim Host Magisk zip, installed from the Magisk app (Play Protect blocks a downloaded app). After the restart the host opens its screen by itself, ready to pair.\nTosbiSim is the phone app from the start and keeps the host silent through every call, box mode or not.\nThe host repairs itself if an update or Android takes away a permission, the battery exemption or the SMS role.\nNew: \"Stop using this phone as a host\" gives the phone back as an ordinary phone (sounds, screen and button settings, Wi-Fi, its own phone and messaging apps), your iPhone forgets it, and TosbiSim removes itself and restarts the phone.",

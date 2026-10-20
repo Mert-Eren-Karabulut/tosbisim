@@ -23,6 +23,9 @@ object Inventory {
     private const val FORMAT = 1                     // bump when the content changes: every phone sends it again
     private const val FILE = "/data/adb/tosbisim/inventory.txt"
     private const val PART_BYTES = 40_000            // gzip+base64 per report; the rest of the report is ~3 KB
+    // The server takes at most 64 KB of JSON, and PHP writes every "/" as "\/": each report stays under this as sent
+    private const val REPORT_BYTES = 56_000
+    private const val REST_BYTES = 4_000             // facts, wrapper and part fields
     private val exec = Bg.single("inventory")
     private lateinit var app: Context
 
@@ -39,12 +42,16 @@ object Inventory {
         if (!due()) return@execute
         val lines = Root.sh("cat $FILE", 20_000).takeIf { it.ok }?.out?.lines()?.filter { it.isNotBlank() }.orEmpty()
         if (lines.isEmpty()) { Log.w(TAG, "inventory: nothing read"); return@execute }
-        val parts = split(lines)
         val extra = JSONObject()
             .put("daemon", reply)
             .put("cards", read("cat /proc/asound/cards"))
             .put("pcm", read("cat /proc/asound/pcm"))
             .put("dt_sound", dtSound())
+        // Part 1 also carries these (up to ~28 KB): on top of a full 40 KB part it could pass the server's limit and
+        // be refused, for ever (audit, 20 Oct 2026). Its share of the controls is what is left. Android's JSONObject
+        // escapes "/" as PHP does, so this is their size as sent.
+        val first = (REPORT_BYTES - REST_BYTES - extra.toString().length).coerceIn(4_000, PART_BYTES)
+        val parts = split(lines, first)
         parts.forEachIndexed { i, gz ->
             val detail = JSONObject().put("what", "hw_inventory").put("format", FORMAT)
                 .put("part", i + 1).put("parts", parts.size).put("controls", lines.size).put("controls_gz", gz)
@@ -55,15 +62,17 @@ object Inventory {
         Log.i(TAG, "inventory: ${lines.size} controls queued in ${parts.size} report(s)")
     }
 
-    /** Lines gzipped in groups whose base64 stays under [PART_BYTES] (text compresses ~8x: start from that, then check). */
-    private fun split(lines: List<String>): List<String> {
+    /** Lines gzipped in groups whose base64, as sent, stays under [PART_BYTES] ([first] for part 1). Text compresses
+     *  ~8x: start from that, then check. */
+    private fun split(lines: List<String>, first: Int): List<String> {
         val out = ArrayList<String>()
         var from = 0
         while (from < lines.size) {
+            val budget = if (out.isEmpty()) first else PART_BYTES
             var to = lines.size
             var gz = pack(lines.subList(from, to))
-            while (gz.length > PART_BYTES && to - from > 1) {
-                to = from + maxOf(1, ((to - from).toLong() * PART_BYTES / gz.length * 9 / 10).toInt())
+            while (sent(gz) > budget && to - from > 1) {
+                to = from + maxOf(1, ((to - from).toLong() * budget / sent(gz) * 9 / 10).toInt())
                 gz = pack(lines.subList(from, to))
             }
             out.add(gz)
@@ -71,6 +80,9 @@ object Inventory {
         }
         return out
     }
+
+    /** Base64's size in the JSON as sent: every "/" becomes "\/". */
+    private fun sent(b64: String) = b64.length + b64.count { it == '/' }
 
     private fun pack(lines: List<String>): String {
         val b = ByteArrayOutputStream()

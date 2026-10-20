@@ -29,6 +29,23 @@ class HostService : Service() {
             runCatching { ctx.startForegroundService(Intent(ctx, HostService::class.java)) }
                 .onFailure { Log.w(TAG, "host start: $it") }
         }
+
+        /** Silence policy: system, ring and notification volumes at minimum. Here, not in service.sh: on Android 11
+         *  `cmd media_session volume` calls ActivityThread.systemMain() inside system_server, which then crashes on its
+         *  next service bind (soft reboot ~25 s after every boot; Redmi Note 8 Pro, 18 Oct).
+         *  Ring volume 0 moves the ringer from silent to vibrate, which turns Do Not Disturb off: total silence is put
+         *  back afterwards (service.sh gives us DND access). Also Retire's roll-back after a failed removal. */
+        fun silence(ctx: Context) {
+            if (Retire.running) return
+            val am = ctx.getSystemService(AudioManager::class.java) ?: return
+            Retire.snapshotVolumes(ctx, am)                    // once: what "Stop using as host" gives back
+            for (s in intArrayOf(AudioManager.STREAM_SYSTEM, AudioManager.STREAM_RING, AudioManager.STREAM_NOTIFICATION)) {
+                runCatching { am.setStreamVolume(s, am.getStreamMinVolume(s), 0) }.onFailure { Log.w(TAG, "volume $s: $it") }
+            }
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            runCatching { if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE) }
+            Log.i(TAG, "streams silenced; zen_mode=${Settings.Global.getInt(ctx.contentResolver, "zen_mode", -1)}")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -49,7 +66,7 @@ class HostService : Service() {
         }
         Log.i(TAG, "host service up; silence: zen_mode=${Settings.Global.getInt(contentResolver, "zen_mode", -1)} " +
                 "(2 = total silence)")
-        silenceStreams()
+        silence(this)
         running = true
         Diag.milestone("host_running", org.json.JSONObject().apply { Compat.bleCaps(this@HostService)?.let { put("ble", it) } })
         Onboarding.hostRunning(this)
@@ -72,23 +89,6 @@ class HostService : Service() {
             runCatching { startActivity(Intent(this, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 .onFailure { Log.w(TAG, "welcome screen: $it") }
         }, 8_000)
-    }
-
-    /** Silence policy: system, ring and notification volumes at minimum. Here, not in service.sh: on Android 11
-     *  `cmd media_session volume` calls ActivityThread.systemMain() inside system_server, which then crashes on its
-     *  next service bind (soft reboot ~25 s after every boot; Redmi Note 8 Pro, 18 Oct).
-     *  Ring volume 0 moves the ringer from silent to vibrate, which turns Do Not Disturb off: total silence is put
-     *  back afterwards (service.sh gives us DND access). */
-    private fun silenceStreams() {
-        if (Retire.running) return
-        val am = getSystemService(AudioManager::class.java) ?: return
-        Retire.snapshotVolumes(this, am)                    // once: what "Stop using as host" gives back
-        for (s in intArrayOf(AudioManager.STREAM_SYSTEM, AudioManager.STREAM_RING, AudioManager.STREAM_NOTIFICATION)) {
-            runCatching { am.setStreamVolume(s, am.getStreamMinVolume(s), 0) }.onFailure { Log.w(TAG, "volume $s: $it") }
-        }
-        val nm = getSystemService(NotificationManager::class.java)
-        if (nm.isNotificationPolicyAccessGranted) nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
-        Log.i(TAG, "streams silenced; zen_mode=${Settings.Global.getInt(contentResolver, "zen_mode", -1)}")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

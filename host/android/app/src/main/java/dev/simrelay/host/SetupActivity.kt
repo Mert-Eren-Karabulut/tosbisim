@@ -41,11 +41,14 @@ import java.util.concurrent.Executors
 class SetupActivity : Activity() {
     private enum class Mark(val glyph: String) { OK("✓"), WARN("!"), FAIL("✗"), WAIT("…") }
     private data class Check(val title: String, val mark: Mark, val detail: String)
-    private enum class Act { CHECK_ROOT, INSTALL, RESTART, REINSTALL, DEV_OPTIONS, MAGISK_GUIDE, FIX, OPEN_PAIRING, PAIR_OTHER, LOCK_SETTINGS }
+    private enum class Act { CHECK_ROOT, INSTALL, RESTART, REINSTALL, DEV_OPTIONS, MAGISK_GUIDE, FIX, OPEN_PAIRING, PAIR_OTHER, LOCK_SETTINGS,
+        OPEN_MAGISK, RETIRE, RETIRE_DISMISS }
     private data class Btn(val label: String, val act: Act?, val enabled: Boolean = true)
     private data class Card(val title: String, val body: String, val mark: Mark, val primary: Btn? = null, val secondary: Btn? = null,
                             val countdown: Boolean = false)
-    private data class Model(val subtitle: String, val step: Int, val steps: Int, val card: Card, val checks: List<Check>)
+    // [report]: part of the model so its progress redraws the screen, also after a rotation
+    private data class Model(val subtitle: String, val step: Int, val steps: Int, val card: Card, val checks: List<Check>,
+                             val report: Diag.Report = Diag.report)
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "setup-facts").apply { isDaemon = true } }
@@ -58,10 +61,10 @@ class SetupActivity : Activity() {
     private val building = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var buildFails = 0
     private val createdAt = android.os.SystemClock.elapsedRealtime()
-    @Volatile private var reportSent = false
     private var host = false
     private var shown: Model? = null
     private var countdown: TextView? = null
+    private var retireStatus: TextView? = null              // the removal's progress screen, while it is up
     private lateinit var root: LinearLayout
     private lateinit var c: Palette
 
@@ -88,8 +91,12 @@ class SetupActivity : Activity() {
         root.addView(text(getString(R.string.checking), 16f, c.secondary))
     }
 
-    override fun onResume() { super.onResume(); resumed = true; tick.run() }
-    override fun onPause() { super.onPause(); resumed = false; main.removeCallbacks(tick) }
+    override fun onResume() {
+        super.onResume(); resumed = true
+        Retire.changed = { if (resumed) { shown = null; if (Retire.running) showRetire() else tick.run() } }
+        tick.run()
+    }
+    override fun onPause() { super.onPause(); resumed = false; Retire.changed = null; main.removeCallbacks(tick) }
     override fun onDestroy() { super.onDestroy(); worker.shutdown() }
 
     private val tick = object : Runnable {
@@ -129,7 +136,18 @@ class SetupActivity : Activity() {
 
     // ------------------------------------------------------------------ the journey
 
-    private fun model(): Model = if (host) hostModel() else setupModel()
+    private fun model(): Model {
+        val m = if (host) hostModel() else setupModel()
+        if (Retire.failed == 0) return m
+        // The removal stopped (nothing changed, or rolled back to a working host): say why, offer it again
+        val body = listOfNotNull(getString(Retire.failed), if (Retire.unpaired) getString(R.string.retire_unpaired) else null)
+        return m.copy(step = 0, steps = 0, card = Card(getString(R.string.retire_failed_title), body.joinToString("\n\n"), Mark.FAIL,
+            Btn(getString(R.string.btn_retry), Act.RETIRE), Btn(getString(R.string.btn_close), Act.RETIRE_DISMISS)))
+    }
+
+    /** Magisk's own app, when it can be opened (a hidden Magisk has another package name). */
+    private fun magiskIntent(): Intent? = runCatching { packageManager.getLaunchIntentForPackage("com.topjohnwu.magisk") }.getOrNull()
+    private fun magiskBtn() = if (magiskIntent() != null) Btn(getString(R.string.btn_open_magisk), Act.OPEN_MAGISK) else null
 
     /** Before root: 1 unlock, 2 root, 3 install, 4 restart; then the host steps. */
     private fun setupModel(): Model {
@@ -153,6 +171,9 @@ class SetupActivity : Activity() {
         )
         val sub = getString(R.string.subtitle_setup)
         fun at(step: Int, card: Card) = Model(sub, step, 6, card, checks)
+        // Installed from the Magisk app after a failed install here: the failure no longer applies
+        if (module in listOf(Onboarding.Module.PENDING_RESTART, Onboarding.Module.ENABLED_NEEDS_RESTART, Onboarding.Module.ACTIVE))
+            Onboarding.clearInstallFailure()
         val install = Onboarding.install
         return when {
             !Onboarding.is64Bit -> at(0, cant(getString(R.string.cant_32bit)))
@@ -162,7 +183,7 @@ class SetupActivity : Activity() {
             install == Onboarding.Install.RESTART_PENDING ->
                 at(4, Card(getString(R.string.restart_title), getString(R.string.restart_body), Mark.OK, Btn(getString(R.string.btn_restart), Act.RESTART)))
             install == Onboarding.Install.BUSY ->
-                at(3, Card(getString(R.string.install_title), getString(R.string.install_body), Mark.WAIT, Btn(getString(R.string.btn_installing), null, false)))
+                at(3, Card(getString(R.string.install_title), getString(R.string.install_busy_body), Mark.WAIT, Btn(getString(R.string.btn_installing), null, false)))
             install == Onboarding.Install.FAILED ->
                 at(3, Card(getString(R.string.install_failed_title), getString(R.string.install_failed_body, Onboarding.installError),
                     Mark.FAIL, if (rooted) Btn(getString(R.string.btn_retry), Act.INSTALL) else Btn(getString(R.string.btn_check_root), Act.CHECK_ROOT),
@@ -172,7 +193,10 @@ class SetupActivity : Activity() {
                 at(4, Card(getString(R.string.restart_title), getString(R.string.restart_body), Mark.OK,
                     Btn(getString(R.string.btn_restart), Act.RESTART), Btn(getString(R.string.btn_reinstall), Act.REINSTALL)))
             rooted && module in listOf(Onboarding.Module.DISABLED, Onboarding.Module.REMOVING, Onboarding.Module.ACTIVE) -> at(4, inactive())
-            rooted -> at(3, Card(getString(R.string.install_title), getString(R.string.install_body), Mark.OK, Btn(getString(R.string.btn_install), Act.INSTALL)))
+            // The Magisk zip is the way to install (20 Oct 2026); this app's own copy of the module stays as a second way
+            rooted -> at(3, Card(getString(R.string.install_title), getString(R.string.install_body), Mark.OK,
+                magiskBtn() ?: Btn(getString(R.string.btn_install_here), Act.INSTALL),
+                if (magiskBtn() != null) Btn(getString(R.string.btn_install_here), Act.INSTALL) else null))
             // Root checks first: a running check, or su that answered "no" / not at all, proves more than the bootloader
             // flag (which some phones spoof).
             rootState == Onboarding.Root.CHECKING -> at(2, Card(getString(R.string.root_title), getString(R.string.root_checking), Mark.WAIT,
@@ -200,6 +224,7 @@ class SetupActivity : Activity() {
         val privMissing = Onboarding.missing(this, Onboarding.PRIVILEGED)
         val runtimeMissing = Onboarding.missing(this, Onboarding.RUNTIME)
         val sms = Onboarding.smsRole(this)
+        val dialer = Onboarding.dialerRole(this)
         val battery = Onboarding.batteryExempt(this)
         val silent = Onboarding.silent(this)
         val bt = getSystemService(BluetoothManager::class.java).adapter
@@ -207,7 +232,7 @@ class SetupActivity : Activity() {
         val paired = Relay.pairedClient()
         val sims = runCatching { Sims.status(this) }.getOrDefault(emptyList())
         val v = Compat.verdict(this)
-        val permsOk = runtimeMissing.isEmpty() && sms && battery && silent
+        val permsOk = runtimeMissing.isEmpty() && sms && dialer && battery && silent
         // A PIN/pattern/password: after a restart or power cut TosbiSim can't start until someone unlocks the phone
         // (credential-encrypted storage), which nobody can on a phone without a screen (audit, 19 Oct).
         val locked = getSystemService(KeyguardManager::class.java).isDeviceSecure
@@ -215,22 +240,28 @@ class SetupActivity : Activity() {
         val checks = listOf(
             Check(getString(R.string.c_phone), Mark.OK, getString(R.string.c_phone_detail, v.name, Build.VERSION.RELEASE, Compat.soc())),
             Check(getString(R.string.c_service), if (daemonOk) Mark.OK else if (daemonProbed) Mark.FAIL else Mark.WAIT,
-                if (daemonOk) getString(R.string.service_ok, d!!.removePrefix("OK ").substringBefore(" card")) else getString(R.string.service_down)),
+                getString(if (daemonOk) R.string.service_ok else R.string.service_down)),
             Check(getString(R.string.c_module), if (privMissing.isEmpty()) Mark.OK else Mark.FAIL,
                 if (privMissing.isEmpty()) getString(R.string.module_active) else getString(R.string.fix_privileged, names(privMissing))),
             Check(getString(R.string.c_permissions), if (permsOk) Mark.OK else Mark.WARN,
-                if (permsOk) getString(R.string.perm_ok) else problems(runtimeMissing, sms, battery, silent, true).joinToString(" ")),
+                if (permsOk) getString(R.string.perm_ok) else problems(runtimeMissing, sms, dialer, battery, silent, true).joinToString(" ")),
             Check(getString(R.string.c_bluetooth), if (btOn) Mark.OK else Mark.FAIL, getString(if (btOn) R.string.ble_ok else R.string.ble_off)),
             Check(getString(R.string.c_lock), if (locked) Mark.WARN else Mark.OK, getString(if (locked) R.string.lock_on else R.string.lock_off)),
             Check(getString(R.string.c_iphone), if (paired != null && Relay.clientConnected()) Mark.OK else Mark.WARN,
                 when { paired == null -> getString(R.string.iphone_none); Relay.clientConnected() -> getString(R.string.iphone_connected, paired)
                     else -> getString(R.string.iphone_away, paired) }),
-            Check(getString(R.string.c_sim), when { sims.isEmpty() -> Mark.FAIL; sims.any { it.lock != Sim.Lock.UNLOCKED } -> Mark.WARN; else -> Mark.OK },
+            // A switched-off SIM isn't fine either (it showed as OK; audit, 20 Oct 2026)
+            Check(getString(R.string.c_sim), when { sims.isEmpty() -> Mark.FAIL; sims.any { it.lock != Sim.Lock.UNLOCKED || !it.enabled } -> Mark.WARN; else -> Mark.OK },
                 if (sims.isEmpty()) getString(R.string.sim_none) else sims.joinToString("\n") { simLine(it) }),
             Check(getString(R.string.c_audio), if (VoiceGate.fullVoice) Mark.OK else Mark.WARN,
                 getString(when { VoiceGate.fullVoice -> R.string.audio_full; Daemon.hasProfile() -> R.string.audio_untested; else -> R.string.audio_basic })),
-            Check(getString(R.string.c_box), if (Box.on) Mark.OK else Mark.WARN,
-                if (Box.on) getString(R.string.box_on, Box.chargeLimit) else getString(R.string.box_off)),
+            Check(getString(R.string.c_box), when { !Box.on -> Mark.WARN; Box.suspended -> Mark.WAIT; else -> Mark.OK }, when {
+                !Box.on -> getString(R.string.box_off)
+                // Paused by the button gesture: say until when (it said "On" while the screen was usable)
+                Box.suspended -> getString(R.string.box_paused, android.text.format.DateFormat.getTimeFormat(this).format(java.util.Date(Box.suspendedUntil)))
+                // The charge limit only where this phone has one (it promised 80 % on phones that charge to 100)
+                Box.chargeSupported -> getString(R.string.box_on, Box.chargeLimit)
+                else -> getString(R.string.box_on_plain) }),
         )
         val sub = getString(R.string.subtitle_host)
         fun at(step: Int, card: Card) = Model(sub, step, 6, card, checks)
@@ -238,10 +269,13 @@ class SetupActivity : Activity() {
         val pairing = Relay.pairingOpen()
         // Paired but not finished: another iPhone can still take over (a phone passed on, a new iPhone).
         val other = if (pairing) null else Btn(getString(R.string.btn_pair_other), Act.PAIR_OTHER)
+        // A failed reinstall matters while the host is still broken; a healthy host (fixed by a restart, or installed
+        // from Magisk) drops it, or it outranked every card for the rest of the process (audit, 20 Oct 2026)
+        if (daemonOk && privMissing.isEmpty()) Onboarding.clearInstallFailure()
         return when {
             // A reinstall from this screen: its progress and result before anything else (a restart finishes it).
             Onboarding.install == Onboarding.Install.BUSY ->
-                at(5, Card(getString(R.string.install_title), getString(R.string.install_body), Mark.WAIT, Btn(getString(R.string.btn_installing), null, false)))
+                at(5, Card(getString(R.string.install_title), getString(R.string.install_busy_body), Mark.WAIT, Btn(getString(R.string.btn_installing), null, false)))
             Onboarding.install == Onboarding.Install.FAILED ->
                 at(5, Card(getString(R.string.install_failed_title), getString(R.string.install_failed_body, Onboarding.installError),
                     Mark.FAIL, Btn(getString(R.string.btn_retry), Act.REINSTALL), Btn(getString(R.string.btn_restart), Act.RESTART)))
@@ -252,15 +286,24 @@ class SetupActivity : Activity() {
             privMissing.isNotEmpty() -> at(5, Card(getString(R.string.fix_title), getString(R.string.fix_privileged, names(privMissing)), Mark.FAIL,
                 Btn(getString(R.string.btn_reinstall), Act.REINSTALL), Btn(getString(R.string.btn_restart), Act.RESTART)))
             !permsOk || !btOn -> at(5, Card(getString(R.string.fix_title),
-                (problems(runtimeMissing, sms, battery, silent, btOn) + getString(R.string.fix_hint)).joinToString("\n"), Mark.WARN,
+                (problems(runtimeMissing, sms, dialer, battery, silent, btOn) +
+                    getString(if (Onboarding.fixRootRefused) R.string.fix_root_refused else R.string.fix_hint)).joinToString("\n"), Mark.WARN,
                 Btn(getString(if (fixing) R.string.btn_fixing else R.string.btn_fix), if (fixing) null else Act.FIX, !fixing)))
             // Unpaired: ready for the first iPhone, nothing to open.
             locked -> at(5, Card(getString(R.string.lock_title), getString(R.string.lock_body), Mark.WARN,
                 Btn(getString(R.string.btn_lock_settings), Act.LOCK_SETTINGS)))
             paired == null -> at(5, Card(getString(R.string.pair_title), getString(R.string.pair_body, btName(bt)), Mark.WARN, countdown = true))
             sims.isEmpty() -> at(6, Card(getString(R.string.sim_title), getString(R.string.sim_body), Mark.FAIL))
-            sims.any { it.lock != Sim.Lock.UNLOCKED } ->
-                at(6, Card(getString(R.string.sim_title), getString(R.string.sim_locked, sims.first { it.lock != Sim.Lock.UNLOCKED }.slot + 1), Mark.WARN))
+            sims.any { it.lock != Sim.Lock.UNLOCKED } -> sims.first { it.lock != Sim.Lock.UNLOCKED }.let { s ->
+                // What unlocks it: a PIN or the PUK on the iPhone; a carrier lock or a dead SIM only the operator
+                // (every lock said "enter its PIN"; audit, 20 Oct 2026)
+                at(6, Card(getString(R.string.sim_locked_title), getString(when (s.lock) {
+                    Sim.Lock.PIN_REQUIRED -> R.string.sim_locked
+                    Sim.Lock.PUK_REQUIRED -> R.string.sim_locked_puk
+                    Sim.Lock.PERM_DISABLED -> R.string.sim_locked_perm
+                    else -> R.string.sim_locked_carrier
+                }, s.slot + 1), Mark.WARN)) }
+            sims.none { it.enabled } -> at(6, Card(getString(R.string.sim_off_title), getString(R.string.sim_switched_off), Mark.WARN))
             Daemon.hasProfile() && !VoiceGate.fullVoice -> at(6, Card(getString(R.string.next_title),
                 getString(if (VoiceGate.passedBeforeUpdate) R.string.next_retest else R.string.next_test, paired), Mark.WARN,
                 secondary = other, countdown = pairing))
@@ -286,21 +329,42 @@ class SetupActivity : Activity() {
             else -> R.string.inactive_other
         })
         Diag.event("module_inactive", org.json.JSONObject().put("what", m.name.lowercase()))
-        val restart = m == Onboarding.Module.PENDING_RESTART || m == Onboarding.Module.ENABLED_NEEDS_RESTART
-        return Card(getString(R.string.inactive_title), why, Mark.FAIL,
-            if (restart) Btn(getString(R.string.btn_restart), Act.RESTART) else Btn(getString(R.string.btn_reinstall), Act.REINSTALL),
-            if (restart) null else Btn(getString(R.string.btn_restart), Act.RESTART))
+        val restart = Btn(getString(R.string.btn_restart), Act.RESTART)
+        val reinstall = Btn(getString(R.string.btn_install_here), Act.REINSTALL)
+        // The buttons do what the text says: turned off -> Magisk, then restart; gone -> the zip in Magisk (or this
+        // app's copy); pending -> restart (a disabled module was offered "Reinstall"; audit, 20 Oct 2026)
+        val (primary, secondary) = when (m) {
+            Onboarding.Module.PENDING_RESTART, Onboarding.Module.ENABLED_NEEDS_RESTART -> restart to null
+            Onboarding.Module.DISABLED -> (magiskBtn() ?: restart) to (if (magiskBtn() != null) restart else null)
+            Onboarding.Module.REMOVING, Onboarding.Module.NONE -> (magiskBtn() ?: reinstall) to (if (magiskBtn() != null) reinstall else restart)
+            else -> reinstall to restart
+        }
+        return Card(getString(R.string.inactive_title), why, Mark.FAIL, primary, secondary)
     }
 
-    private fun problems(runtime: List<String>, sms: Boolean, battery: Boolean, silent: Boolean, bt: Boolean) = listOfNotNull(
+    private fun problems(runtime: List<String>, sms: Boolean, dialer: Boolean, battery: Boolean, silent: Boolean, bt: Boolean) = listOfNotNull(
         if (!bt) getString(R.string.fix_bluetooth) else null,
         if (runtime.isNotEmpty()) getString(R.string.fix_permissions, names(runtime)) else null,
         if (!sms) getString(R.string.fix_sms) else null,
+        if (!dialer) getString(R.string.fix_dialer) else null,
         if (!battery) getString(R.string.fix_battery) else null,
         if (!silent) getString(R.string.fix_silence) else null,
     )
 
-    private fun names(perms: List<String>) = perms.joinToString { it.substringAfterLast('.') }
+    /** What a missing permission is for, in words (not "READ_PHONE_STATE"). */
+    private fun names(perms: List<String>) = perms.map {
+        when (it.substringAfterLast('.')) {
+            "READ_PHONE_STATE", "CALL_PHONE" -> R.string.perm_phone
+            "RECEIVE_SMS", "SEND_SMS", "READ_SMS" -> R.string.perm_sms
+            "BLUETOOTH_ADVERTISE", "BLUETOOTH_CONNECT" -> R.string.perm_bluetooth
+            "POST_NOTIFICATIONS" -> R.string.perm_notifications
+            "MODIFY_PHONE_STATE" -> R.string.perm_phone_control
+            "WRITE_SECURE_SETTINGS" -> R.string.perm_settings
+            "CONTROL_INCALL_EXPERIENCE" -> R.string.perm_call_screen
+            "TETHER_PRIVILEGED" -> R.string.perm_hotspot
+            else -> R.string.perm_other
+        }
+    }.distinct().joinToString { getString(it) }
 
     private fun unlockHint() = when (Build.MANUFACTURER.lowercase()) {
         "samsung" -> R.string.unlock_samsung
@@ -337,6 +401,7 @@ class SetupActivity : Activity() {
     private fun simLine(s: Sim) = getString(R.string.sim_line, s.slot + 1, when {
         s.lock == Sim.Lock.PIN_REQUIRED -> getString(R.string.sim_pin)
         s.lock == Sim.Lock.PUK_REQUIRED -> getString(R.string.sim_puk)
+        s.lock == Sim.Lock.PERM_DISABLED -> getString(R.string.sim_perm_disabled)
         s.lock != Sim.Lock.UNLOCKED -> getString(R.string.sim_network_lock)
         !s.enabled -> getString(R.string.sim_off)
         else -> getString(R.string.sim_ok, s.operatorName, s.signalLevel, getString(if (s.volte) R.string.yes else R.string.no))
@@ -354,8 +419,11 @@ class SetupActivity : Activity() {
             Act.OPEN_PAIRING -> { Relay.openPairing(); again() }
             Act.PAIR_OTHER -> AlertDialog.Builder(this)
                 .setMessage(getString(R.string.pair_other_confirm, Relay.pairedClient() ?: ""))
-                .setPositiveButton(R.string.btn_continue) { _, _ -> Relay.openPairing(); again() }
+                .setPositiveButton(R.string.btn_continue) { _, _ -> unlocked { Relay.openPairing(); again() } }
                 .setNegativeButton(R.string.btn_cancel, null).show()
+            Act.OPEN_MAGISK -> magiskIntent()?.let { i -> runCatching { startActivity(i) } }
+            Act.RETIRE -> unlocked { retire() }
+            Act.RETIRE_DISMISS -> { Retire.dismiss(); again() }
             Act.DEV_OPTIONS -> runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                 .onFailure { runCatching { startActivity(Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)) } }
             Act.LOCK_SETTINGS -> runCatching { startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
@@ -364,10 +432,23 @@ class SetupActivity : Activity() {
         }
     }
 
+    /**
+     * A destructive action (giving the phone back, letting another iPhone take it) only from someone who could unlock
+     * the phone: this screen also shows over a secure lock screen, after the escape gesture (audit, 20 Oct 2026).
+     */
+    private fun unlocked(then: () -> Unit) {
+        val km = getSystemService(KeyguardManager::class.java)
+        if (!km.isKeyguardLocked) return then()
+        km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() { main.post(then) }
+        })
+    }
+
     // ------------------------------------------------------------------ views
 
     private fun show(m: Model) {
-        if (Retire.running) return                     // the removal's own progress screen stays
+        if (Retire.running) { showRetire(); return }    // the removal's own progress screen, also after a rotation
+        retireStatus = null
         if (m != shown) {
             shown = m
             root.removeAllViews()
@@ -383,7 +464,8 @@ class SetupActivity : Activity() {
                 m.checks.forEach { addView(row(it)) }
             })
             root.addView(diagnostics(), lp(top = 14))
-            if (host) root.addView(retireCard(), lp(top = 14))
+            // Whenever root works, a broken host too (module turned off, service down): it must be removable
+            if (host || Onboarding.root == Onboarding.Root.OK) root.addView(retireCard(), lp(top = 14))
             root.addView(text(getString(R.string.host_version, BuildConfigInfo.version(this)), 12f, c.secondary).apply { setPadding(dp(4), dp(16), 0, 0) })
         }
         updateCountdown()
@@ -406,14 +488,18 @@ class SetupActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         background = rounded(c.card, 18)
         setPadding(dp(18), dp(18), dp(18), dp(18))
+        // The next step changes by itself (root granted, the iPhone paired): TalkBack users hear it
+        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         addView(LinearLayout(this@SetupActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(badge(k.mark, 30))
+            addView(badge(k.mark, 30).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES; contentDescription = markName(k.mark) })
             addView(text(k.title, 20f, c.text, bold = true).apply { setPadding(dp(12), 0, 0, 0); isFocusable = true })
         })
         addView(text(k.body, 15.5f, c.text).apply { setPadding(0, dp(12), 0, 0); setLineSpacing(0f, 1.15f) })
-        countdown = if (k.countdown) text("", 14f, c.accent, bold = true).apply { setPadding(0, dp(10), 0, 0) }.also { addView(it) } else null
+        countdown = if (k.countdown) text("", 14f, c.accent, bold = true).apply {
+            setPadding(0, dp(10), 0, 0); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }.also { addView(it) } else null
         k.primary?.let { addView(button(it, primary = true), lp(top = 16)) }
         k.secondary?.let { addView(button(it, primary = false), lp(top = 8)) }
     }
@@ -421,11 +507,15 @@ class SetupActivity : Activity() {
     private fun updateCountdown() {
         val t = countdown ?: return
         val left = Relay.pairingSecondsLeft()
-        t.text = when {
+        // With TalkBack on, whole minutes: a live region that changes every 2 s would talk over everything else
+        val spoken = getSystemService(android.view.accessibility.AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
+        val s = when {
             Relay.pairedClient() == null -> getString(R.string.pair_ready)
+            left > 0 && spoken -> getString(R.string.pair_open_minutes, (left + 59) / 60)
             left > 0 -> getString(R.string.pair_open_left, "%d:%02d".format(left / 60, left % 60))
             else -> getString(R.string.pair_closed)
         }
+        if (t.text.toString() != s) t.text = s
     }
 
     private fun row(k: Check) = LinearLayout(this).apply {
@@ -454,13 +544,21 @@ class SetupActivity : Activity() {
             setOnCheckedChangeListener { _, on -> Diag.enabled = on }
         }, lp(top = 6))
         addView(text(getString(R.string.diag_note), 12.5f, c.secondary).apply { setPadding(0, dp(4), 0, 0) })
-        addView(button(Btn(getString(if (reportSent) R.string.report_sent else R.string.btn_send_report), null, !reportSent), primary = false).apply {
-            if (!reportSent) setOnClickListener {
-                Diag.event("user_report", org.json.JSONObject().put("what", if (host) "host" else "setup")
-                    .put("screen", shown?.card?.title ?: ""), force = true)
-                reportSent = true; shown = null; tick.run()
+        // What really happened: sending, sent, queued (offline) or refused; it said "sent" while nothing left the phone
+        val r = Diag.report
+        val label = when (r) { Diag.Report.SENDING -> R.string.btn_sending; Diag.Report.SENT -> R.string.report_sent; else -> R.string.btn_send_report }
+        val can = r == Diag.Report.IDLE || r == Diag.Report.REFUSED
+        addView(button(Btn(getString(label), null, can), primary = false).apply {
+            if (can) setOnClickListener {
+                Diag.userReport(org.json.JSONObject().put("what", if (host) "host" else "setup").put("screen", shown?.card?.title ?: "")) {
+                    main.post { if (resumed) { shown = null; tick.run() } }
+                }
+                shown = null; tick.run()
             }
         }, lp(top = 10))
+        when (r) { Diag.Report.QUEUED -> R.string.report_failed; Diag.Report.REFUSED -> R.string.report_refused; else -> null }?.let {
+            addView(text(getString(it), 12.5f, c.secondary).apply { setPadding(0, dp(6), 0, 0); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE })
+        }
     }
 
     /** "Stop using this phone as a host": the phone back as an ordinary phone, TosbiSim removed (Retire). */
@@ -475,18 +573,31 @@ class SetupActivity : Activity() {
             setOnClickListener {
                 AlertDialog.Builder(this@SetupActivity).setTitle(R.string.retire_confirm_title)
                     .setMessage(R.string.retire_confirm_body)
-                    .setPositiveButton(R.string.retire_confirm_yes) { _, _ -> retire() }
+                    .setPositiveButton(R.string.retire_confirm_yes) { _, _ -> unlocked { retire() } }
                     .setNegativeButton(R.string.btn_cancel, null).show()
             }
         }, lp(top = 10))
     }
 
     private fun retire() {
-        root.removeAllViews()
-        root.addView(text(getString(R.string.app_name), 28f, c.text, bold = true))
-        val status = text("", 16f, c.text).apply { setPadding(0, dp(14), 0, 0); setLineSpacing(0f, 1.15f) }
-        root.addView(status)
-        Retire.start(this) { s -> status.text = s }
+        Retire.start(this)
+        shown = null
+        showRetire()
+    }
+
+    /** The removal's progress, from [Retire.step] (process-level: a rotation finds it again). */
+    private fun showRetire() {
+        val status = retireStatus ?: text("", 16f, c.text).apply {
+            setPadding(0, dp(14), 0, 0); setLineSpacing(0f, 1.15f)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }.also { t ->
+            root.removeAllViews()
+            root.addView(text(getString(R.string.app_name), 28f, c.text, bold = true))
+            root.addView(t)
+            retireStatus = t
+        }
+        val s = Retire.step.takeIf { it != 0 }?.let { getString(it) }.orEmpty()
+        if (status.text.toString() != s) status.text = s
     }
 
     private fun badge(m: Mark, size: Int) = TextView(this).apply {
@@ -506,13 +617,14 @@ class SetupActivity : Activity() {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
         setTextColor(if (primary) Color.WHITE else if (b.enabled) c.accent else c.secondary)
         minHeight = dp(52); stateListAnimator = null
-        val shape = if (primary) rounded(if (b.enabled) c.accent else c.track, 14)
+        val shape = if (primary) rounded(if (b.enabled) c.button else c.track, 14)
         else GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setStroke(dp(1), c.track); setColor(Color.TRANSPARENT) }
         background = RippleDrawable(ColorStateList.valueOf(c.ripple), shape, null)
         b.act?.let { a -> setOnClickListener { act(a) } }
     }
 
-    private fun markName(m: Mark) = when (m) { Mark.OK -> "done"; Mark.WARN -> "to do"; Mark.FAIL -> "problem"; Mark.WAIT -> "in progress" }
+    private fun markName(m: Mark) = getString(when (m) {
+        Mark.OK -> R.string.mark_done; Mark.WARN -> R.string.mark_todo; Mark.FAIL -> R.string.mark_problem; Mark.WAIT -> R.string.mark_wait })
 
     private fun rounded(color: Int, r: Int) = GradientDrawable().apply { cornerRadius = dp(r).toFloat(); setColor(color) }
 
@@ -526,16 +638,19 @@ class SetupActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    /** Light and dark, following the system. */
+    /** Light and dark, following the system. [button]: the primary button's fill under white text, at least 4.5:1
+     *  (dark mode's bright green gave about 2:1; audit, 20 Oct 2026). */
     private data class Palette(val bg: Int, val card: Int, val text: Int, val secondary: Int, val accent: Int, val warn: Int,
-                               val fail: Int, val track: Int, val ripple: Int) {
+                               val fail: Int, val track: Int, val ripple: Int, val button: Int) {
         companion object {
             fun of(cfg: Configuration) = if ((cfg.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES)
                 Palette(Color.rgb(12, 12, 14), Color.rgb(28, 28, 32), Color.rgb(242, 242, 247), Color.rgb(160, 160, 168),
-                    Color.rgb(48, 209, 88), Color.rgb(255, 159, 10), Color.rgb(255, 69, 58), Color.rgb(58, 58, 64), Color.argb(60, 255, 255, 255))
+                    Color.rgb(48, 209, 88), Color.rgb(255, 159, 10), Color.rgb(255, 69, 58), Color.rgb(58, 58, 64), Color.argb(60, 255, 255, 255),
+                    Color.rgb(26, 127, 55))                     // 5.1:1
             else
                 Palette(Color.rgb(242, 242, 247), Color.WHITE, Color.rgb(20, 20, 24), Color.rgb(98, 98, 108),
-                    Color.rgb(36, 138, 61), Color.rgb(199, 110, 0), Color.rgb(215, 0, 21), Color.rgb(222, 222, 228), Color.argb(40, 0, 0, 0))
+                    Color.rgb(36, 138, 61), Color.rgb(199, 110, 0), Color.rgb(215, 0, 21), Color.rgb(222, 222, 228), Color.argb(40, 0, 0, 0),
+                    Color.rgb(30, 126, 52))                     // 5.2:1 (the accent is 4.4:1)
         }
     }
 }

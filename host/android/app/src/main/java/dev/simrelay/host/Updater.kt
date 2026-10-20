@@ -207,7 +207,14 @@ object Updater {
             val fresh = File(app.cacheDir, "simrelayd")
             ZipFile(zip).use { z -> z.getInputStream(z.getEntry("simrelayd")).use { i -> fresh.outputStream().use { o -> i.copyTo(o) } } }
             val installedSha = Root.sh("sha256sum /data/adb/modules/simrelay-host/simrelayd").out.substringBefore(' ')
-            if (installedSha.isNotEmpty() && installedSha != sha256(fresh)) {
+            val freshSha = sha256(fresh)
+            // service.sh went back to simrelayd.prev because this build kept failing to start, and wrote its sha256
+            // here: installing it again would only repeat that, at every app start (audit, 20 Oct 2026)
+            val rolledBack = Root.sh("cat /data/adb/tosbisim/daemon-rolled-back 2>/dev/null").out
+                .trim().substringBefore(' ').substringBefore('\n').lowercase()
+            if (rolledBack == freshSha) {
+                Log.w(TAG, "simrelayd: this app's build was rolled back by the module after failing; keeping the running one")
+            } else if (installedSha.isNotEmpty() && installedSha != freshSha) {
                 val m = "/data/adb/modules/simrelay-host"
                 // The running build is kept as simrelayd.prev: service.sh goes back to it if the new one won't start
                 Root.sh("cp $m/simrelayd $m/simrelayd.prev; cp ${Root.q(fresh.path)} $m/simrelayd.tmp && chmod 755 $m/simrelayd.tmp && " +

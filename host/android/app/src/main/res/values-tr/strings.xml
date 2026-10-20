@@ -14,7 +14,7 @@
     <string name="cant_32bit">32 bit Android çalıştırıyor; TosbiSim 64 bit bir sistem gerektirir.</string>
     <string name="cant_unsupported">%s</string>
     <string name="cant_unsupported_generic">Önyükleyici kilidi açılamıyor, bu yüzden root\'lanamaz.</string>
-    <string name="cant_alt">Başka bir yedek telefonu TosbiSim uygulamasında arayın: Ana cihaz → Telefon kontrol et.</string>
+    <string name="cant_alt">Başka bir yedek telefonu TosbiSim uygulamasında sorgulayın: Ana cihaz → Telefon sorgula.</string>
 
     <string name="unlock_title">Önyükleyici kilidini açın</string>
     <string name="unlock_body">Root için önyükleyici kilidinin açık olması gerekir. Önce Geliştirici seçeneklerini açın (Ayarlar → Telefon hakkında → Yapım numarasına 7 kez dokunun), sonra Geliştirici seçenekleri → OEM kilidi açma seçeneğini etkinleştirin.</string>
@@ -23,12 +23,12 @@
     <string name="unlock_pixel">Pixel: fastboot\'ta \"fastboot flashing unlock\" komutunu çalıştırın. Operatör (Verizon) Pixel\'lerinin kilidi açılamaz.</string>
     <string name="unlock_code">Üreticiniz web sitesinde bir kilit açma kodu verir (Motorola, Sony); sonra gösterdiği fastboot komutunu çalıştırın.</string>
     <string name="unlock_other">Ardından fastboot\'ta \"fastboot flashing unlock\" komutunu çalıştırın.</string>
-    <string name="unlock_erase">Kilit açma telefondaki her şeyi, bu uygulama dahil siler: sonrasında yeniden kurmak için TosbiSim Ana Cihaz uygulama dosyasını saklayın.</string>
+    <string name="unlock_erase">Kilit açma telefondaki her şeyi siler. Ardından telefonu Magisk ile root\'layın ve TosbiSim-Host-Magisk.zip dosyasını Magisk → Modüller\'den kurun.</string>
     <string name="unlock_cant">Bu telefon önyükleyici kilidinin açılamayacağını bildiriyor.</string>
     <string name="btn_dev_options">Geliştirici seçeneklerini aç</string>
 
     <string name="root_title">Telefonu Magisk ile root\'layın</string>
-    <string name="root_body">Magisk uygulamasını kurun, bu telefonun boot imajını onunla yamalayın ve yamalı imajı yükleyin (Samsung: Odin ile). Magisk\'in rehberi her telefon türünü anlatır. Sonra buraya dönüp Root\'u kontrol et düğmesine dokunun.</string>
+    <string name="root_body">Magisk uygulamasını kurun, bu telefonun boot imajını onunla yamalayın ve yamalı imajı yükleyin (Samsung: Odin ile). Magisk\'in rehberi her telefon türünü anlatır. Sonra TosbiSim-Host-Magisk.zip dosyasını Magisk → Modüller\'den kurup telefonu yeniden başlatın.</string>
     <string name="root_checking">Root kontrol ediliyor… Magisk sorarsa İzin ver\'e dokunun.</string>
     <string name="root_no_su">Henüz root bulunamadı: önce Magisk\'i kurun (rehberine bakın).</string>
     <string name="root_timeout">Magisk yanıt vermedi. Root\'u kontrol et\'e yeniden dokunun ve Magisk sorduğunda İzin ver\'e dokunun.</string>
@@ -36,8 +36,8 @@
     <string name="btn_check_root">Root\'u kontrol et</string>
     <string name="btn_magisk_guide">Magisk rehberini aç</string>
 
-    <string name="install_title">TosbiSim modülünü kurun</string>
-    <string name="install_body">Root çalışıyor. Bu, TosbiSim\'in Magisk modülünü kurar: arka plan hizmeti, izinleri ve sessizlik ayarları. Telefon bir kez yeniden başlar.</string>
+    <string name="install_title">TosbiSim Ana Cihaz modülünü kurun</string>
+    <string name="install_body">Root çalışıyor. Magisk uygulamasında Modüller → Depolamadan yükle\'yi açın, TosbiSim-Host-Magisk.zip dosyasını (tosbisim.com\'dan) seçin ve telefonu yeniden başlatın. TosbiSim kendiliğinden açılır ve bu ekran kaldığı yerden devam eder.</string>
     <string name="btn_install">Kur</string>
     <string name="btn_installing">Kuruluyor…</string>
     <string name="install_failed_title">Kurulum tamamlanmadı</string>
@@ -47,9 +47,9 @@
     <string name="restart_body">Modül kuruldu. Telefonu yeniden başlatın: TosbiSim kendiliğinden açılır ve bu ekran kaldığı yerden devam eder.</string>
     <string name="btn_restart">Şimdi yeniden başlat</string>
     <string name="inactive_title">Modül etkin değil</string>
-    <string name="inactive_disabled">Magisk → Modüller\'de kapalı. Orada açıp telefonu yeniden başlatın.</string>
-    <string name="inactive_removing">Magisk onu kaldırmaya ayarlı. Yeniden kurun.</string>
-    <string name="inactive_none">Artık kurulu değil. Yeniden kurun.</string>
+    <string name="inactive_disabled">Magisk → Modüller\'de kapalı. Orada açın, sonra telefonu yeniden başlatın.</string>
+    <string name="inactive_removing">Magisk onu bir sonraki yeniden başlatmada kaldırmaya ayarlı. TosbiSim\'i tutmak için TosbiSim-Host-Magisk.zip dosyasını Magisk → Modüller\'den yeniden kurun, sonra yeniden başlatın.</string>
+    <string name="inactive_none">Artık kurulu değil. TosbiSim-Host-Magisk.zip dosyasını Magisk → Modüller\'den kurun, sonra yeniden başlatın.</string>
     <string name="inactive_pending">Kurulu ve yeniden başlatmayı bekliyor.</string>
     <string name="inactive_other">Telefon yeniden başladı ama TosbiSim sistem uygulaması olarak açılmadı. Modülü yeniden kurun; işe yaramazsa aşağıdan bir rapor gönderin.</string>
     <string name="btn_reinstall">Modülü yeniden kur</string>
@@ -73,12 +73,12 @@
     <string name="lock_on">PIN, desen veya şifre var: TosbiSim yeniden başlatmadan sonra biri bu telefonun kilidini açana kadar başlayamaz</string>
     <string name="lock_off">Yok: TosbiSim yeniden başlatmadan sonra kendiliğinden başlar</string>
     <string name="lock_title">Ekran kilidini kaldırın</string>
-    <string name="lock_body">PIN, desen veya şifre varken Android, her yeniden başlatma veya elektrik kesintisinden sonra telefonun kilidi açılana kadar TosbiSim\'i kilitli tutar; çekmecedeki bir telefonun kilidini de kimse açmaz. Ekran kilidini Yok (veya Kaydırma) yapın.</string>
+    <string name="lock_body">PIN, desen veya şifre varken Android, her yeniden başlatma veya elektrik kesintisinden sonra telefonun kilidi açılana kadar TosbiSim\'i kilitli tutar; çantanızdaki ya da evde bıraktığınız bir telefonun kilidini de kimse açmaz. Ekran kilidini Yok (veya Kaydırma) yapın.</string>
     <string name="btn_lock_settings">Ekran kilidi ayarlarını aç</string>
     <string name="pair_ready">Eşleştirmeye hazır: bu ana cihazı ilk ekleyen iPhone onu alır.</string>
     <string name="btn_open_pairing">Eşleştirmeyi aç (5 dk)</string>
     <string name="next_title">iPhone\'da devam edin</string>
-    <string name="next_test">%1$s ile eşleşti. Sıradaki adım, iPhone\'daki TosbiSim\'de: Ana cihaz → Arama sesi → Arama testini başlat. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>
+    <string name="next_test">%1$s ile eşleşti. Sıradaki adım, iPhone\'daki TosbiSim\'de: Ana cihaz → Arama sesi → Arama testini yap. Bir arkadaşınızı arayın ve ses çıkarıp çıkarmadığını duymak için bu telefonu yanınızda tutun.</string>
     <string name="next_retest">Bu telefonun yazılımı arama testinden sonra değişti. Tam sesi yeniden açmak için iPhone\'da arama testini tekrar yapın.</string>
     <string name="next_basic">%1$s ile eşleşti. Bu telefon Temel modda çalışır: mesajlar, arama kontrolü ve erişim noktası (arama sesi bu telefonda henüz desteklenmiyor). Sıradaki adım, iPhone\'da: Kutu modunu açın.</string>
     <string name="next_box">%1$s ile eşleşti ve tam ses açık. Son adım, iPhone\'da: bu telefonun ekranı kapalı kalsın diye Kutu modunu açın.</string>
@@ -86,7 +86,7 @@
     <string name="sim_body">SIM bulunamadı. Bir SIM takın (iyi oturduğundan emin olun); TosbiSim onu kendiliğinden algılar.</string>
     <string name="sim_locked">SIM %d kilitli: PIN\'ini iPhone\'daki TosbiSim\'de girin (Ana cihaz → SIM).</string>
     <string name="done_title">Bu telefon hazır</string>
-    <string name="done_body">Şarjda tutun ve kaldırın. Bu ekranı tekrar görmek için Ses Açma\'ya 3 kez, ardından Ses Kısma\'ya 3 kez basın.</string>
+    <string name="done_body">Şarjlı tutun; yanınızda taşıyın (çanta olur) ya da evde bırakın. Bu ekranı tekrar görmek için Ses Açma\'ya 3 kez, ardından Ses Kısma\'ya 3 kez basın.</string>
     <string name="btn_pair_other">Başka bir iPhone eşleştir…</string>
     <string name="pair_other_confirm">%1$s, önümüzdeki 5 dakika içinde başka bir iPhone bağlanana kadar eşli kalır; bağlanan onun yerini alır. Devam edilsin mi?</string>
     <string name="btn_continue">Devam</string>
@@ -113,7 +113,7 @@
     <string name="module_active">Etkin</string>
     <string name="module_missing">Kurulu değil</string>
     <string name="c_service">Arka plan hizmeti</string>
-    <string name="service_ok">Çalışıyor (%s)</string>
+    <string name="service_ok">Çalışıyor</string>
     <string name="service_down">Çalışmıyor</string>
     <string name="c_permissions">İzinler ve roller</string>
     <string name="perm_ok">Telefon, SMS, Bluetooth; varsayılan telefon ve SMS uygulaması; asla uyutulmaz; tam sessizlik</string>
@@ -157,10 +157,47 @@
     <string name="retire_note">Telefonu normal kullanıma geri verir: sesleri, titreşimi, ekranı ve tuşları, kendi telefon ve mesaj uygulamaları ve Wi-Fi geri gelir, iPhone\'unuz onu unutur ve TosbiSim kaldırılır. Sonunda telefon yeniden başlar. Magisk ve kilidi açılmış önyükleyici kalır.</string>
     <string name="retire_btn">Ana cihaz olarak kullanmayı bırak…</string>
     <string name="retire_confirm_title">TosbiSim bu telefondan kaldırılsın mı?</string>
-    <string name="retire_confirm_body">iPhone\'unuza bu SIM\'in aramaları ve mesajları artık gelmez. Telefonu daha sonra yeniden ana cihaz yapmak için TosbiSim\'i kurup yeniden eşleştirin.\n\nMagisk (root) ve kilidi açık önyükleyici kalır: bunlar TosbiSim\'den önce kurulmuştu. Telefonu tamamen fabrika yazılımına döndürmek için ardından Magisk\'i kendi uygulamasından kaldırın.</string>
+    <string name="retire_confirm_body">iPhone\'unuza bu SIM\'in aramaları ve mesajları artık gelmez. Telefonu daha sonra yeniden ana cihaz yapmak için TosbiSim-Host-Magisk.zip dosyasını Magisk → Modüller\'den kurup yeniden eşleştirin.\n\nMagisk (root) ve kilidi açık önyükleyici kalır: bunlar TosbiSim\'den önce kurulmuştu. Telefonu tamamen fabrika yazılımına döndürmek için ardından Magisk\'i kendi uygulamasından kaldırın.</string>
     <string name="retire_confirm_yes">Kaldır ve yeniden başlat</string>
     <string name="retire_step_iphone">iPhone\'unuza bildiriliyor…</string>
     <string name="retire_step_settings">Telefonun ayarları geri veriliyor…</string>
     <string name="retire_step_restart">TosbiSim kaldırılıyor. Telefon birazdan yeniden başlayacak.</string>
-    <string name="retire_failed">TosbiSim kaldırılamadı (root izni verilmedi). Magisk\'i açın, TosbiSim Host modülünü kaldırın ve yeniden başlatın.</string>
+    <string name="retire_failed">Kaldırma başlatılamadı; bu telefon eskisi gibi yine ana cihaz. Tekrar deneyin; başarısız olmaya devam ederse Magisk → Modüller\'i açın, TosbiSim Host\'u kaldırın ve telefonu yeniden başlatın.</string>
+    <!-- audit, 20 Oct 2026 -->
+    <string name="install_busy_body">TosbiSim\'in Magisk modülü bu uygulamadan kuruluyor: arka plan hizmeti, izinleri ve sessizlik ayarları. Ardından telefon bir kez yeniden başlar.</string>
+    <string name="btn_open_magisk">Magisk\'i aç</string>
+    <string name="btn_install_here">Bunun yerine bu uygulamadan kur</string>
+    <string name="btn_close">Kapat</string>
+    <string name="fix_dialer">Varsayılan telefon uygulaması başka bir uygulama.</string>
+    <string name="fix_root_refused">Root reddedildi: Magisk → Süper kullanıcı → TosbiSim Ana Cihaz\'a izin verin, sonra Şimdi düzelt\'e dokunun.</string>
+    <string name="perm_phone">telefon</string>
+    <string name="perm_sms">SMS</string>
+    <string name="perm_bluetooth">Bluetooth</string>
+    <string name="perm_notifications">bildirimler</string>
+    <string name="perm_phone_control">telefon denetimi</string>
+    <string name="perm_settings">sistem ayarları</string>
+    <string name="perm_call_screen">arama ekranı</string>
+    <string name="perm_hotspot">erişim noktası</string>
+    <string name="perm_other">diğerleri</string>
+    <string name="sim_locked_title">SIM kilidini açın</string>
+    <string name="sim_locked_puk">SIM %d bloke: PUK kodunu (SIM\'in kartında ya da operatörünüzden) ve yeni bir PIN\'i iPhone\'daki TosbiSim\'de girin (Ana cihaz → SIM).</string>
+    <string name="sim_locked_carrier">Bu telefon başka bir operatöre kilitli ve SIM %d kartını kabul etmiyor. Bu kilit iPhone\'dan açılamaz: telefonun geldiği operatörden kilidi açmasını isteyin ya da o operatörün bir SIM\'ini kullanın.</string>
+    <string name="sim_locked_perm">SIM %d kalıcı olarak bloke (çok fazla yanlış PUK kodu). Operatörünüzden yeni bir SIM isteyin.</string>
+    <string name="sim_perm_disabled">kalıcı olarak bloke</string>
+    <string name="sim_off_title">SIM kapalı</string>
+    <string name="sim_switched_off">iPhone\'daki TosbiSim\'den açın (Ana cihaz → SIM): kapalıyken arama ve mesaj gelmez.</string>
+    <string name="box_on_plain">Açık</string>
+    <string name="box_paused">%s saatine kadar duraklatıldı (tuş hareketi); ondan sonra ekran kapanınca yeniden açılır</string>
+    <string name="pair_open_minutes">Eşleştirme yaklaşık %d dk daha açık.</string>
+    <string name="report_refused">Sunucu raporu kabul etmedi. Daha sonra tekrar deneyin.</string>
+    <string name="mark_done">tamam</string>
+    <string name="mark_todo">yapılacak</string>
+    <string name="mark_problem">sorun</string>
+    <string name="mark_wait">sürüyor</string>
+    <string name="retire_step_check">Root kontrol ediliyor…</string>
+    <string name="retire_in_call">Bir arama sürüyor, bu yüzden hiçbir şey değiştirilmedi. Arama bitince tekrar deneyin.</string>
+    <string name="retire_no_root">Root reddedildi, bu yüzden hiçbir şey değiştirilmedi. Magisk → Süper kullanıcı bölümünde TosbiSim Ana Cihaz\'a izin verin ve tekrar deneyin.</string>
+    <string name="retire_prepare_failed">Kaldırma hazırlanamadı, bu yüzden hiçbir şey değiştirilmedi. Tekrar deneyin; başarısız olmaya devam ederse aşağıdan bir rapor gönderin.</string>
+    <string name="retire_unpaired">iPhone\'unuza zaten bildirildi ve bu ana cihazı unuttu: kullanmaya devam etmek için iPhone\'da yeniden ekleyin (Ana cihaz ekle).</string>
+    <string name="retire_failed_title">TosbiSim kaldırılmadı</string>
 </resources>

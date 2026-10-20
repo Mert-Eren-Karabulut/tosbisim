@@ -28,7 +28,7 @@ object Daemon {
     private var sock: LocalSocket? = null
     private var reader: BufferedReader? = null
     private var out: OutputStream? = null
-    private var profile: Profile? = null
+    @Volatile private var profile: Profile? = null          // read from the call and setup threads too
     @Volatile private var activeSession = 0
     @Volatile private var chargeLimit = 0          // re-sent on reconnect (sysfs resets on reboot only, but cheap)
 
@@ -44,10 +44,13 @@ object Daemon {
         exec.execute { connect() }
     }
 
-    /** A call is ACTIVE on this voice session (1 or 2). Idempotent. */
-    fun callActive(session: Int) = exec.execute {
-        if (profile == null || activeSession == session) return@execute   // Basic mode: no audio routes to apply
-        if (activeSession == 0) callSince = android.os.SystemClock.elapsedRealtime()
+    /** A call is ACTIVE (or still DIALING: [connected] false) on this voice session (1 or 2). Idempotent. */
+    fun callActive(session: Int, connected: Boolean = true) = exec.execute {
+        if (profile == null) return@execute                              // Basic mode: no audio routes to apply
+        // The audio check counts from the answer: a call that only ever dialled has no caller to hear, and was
+        // reported as a failed call (audit, 20 Oct 2026)
+        if (connected && connectedSince == 0L) connectedSince = android.os.SystemClock.elapsedRealtime()
+        if (activeSession == session) return@execute
         activeSession = session
         request("CALL_START $session")
     }
@@ -56,11 +59,13 @@ object Daemon {
     fun callIdle() = exec.execute {
         if (activeSession == 0) return@execute
         activeSession = 0
-        checkCallAudio(request("AUDIO?"), (android.os.SystemClock.elapsedRealtime() - callSince) / 1000)
+        val since = connectedSince
+        connectedSince = 0L
+        if (since != 0L) checkCallAudio(request("AUDIO?"), (android.os.SystemClock.elapsedRealtime() - since) / 1000)
         request("CALL_END")
     }
 
-    @Volatile private var callSince = 0L
+    @Volatile private var connectedSince = 0L
 
     /**
      * A full-voice call whose audio didn't flow one way (nothing captured from the caller, or nothing of the iPhone's
@@ -83,6 +88,7 @@ object Daemon {
     fun hasProfile(): Boolean = profile != null
     fun profile(): Profile? = profile
     @Volatile private var autoTried = false
+    @Volatile private var inventoryTried = false
 
     /** Build the automatic profile now (debug: on a phone that has a shipped one too) and log it. */
     fun tryAutoProfile(done: (Profile?) -> Unit) = exec.execute {
@@ -153,8 +159,14 @@ object Daemon {
             profile?.daemonSetLines()?.forEach { send(it) }
             if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key
             if (chargeLimit > 0) send("CHARGE $chargeLimit")
-            // Once per firmware, never during a call: the sound card as the kernel describes it (read-only)
-            if (activeSession == 0 && Inventory.due()) send("INVENTORY")?.takeIf { it.startsWith("OK") }?.let { Inventory.send(it) }
+            // Once per firmware, never during a call (not even a ringing one: the daemon is busy for seconds): the sound
+            // card as the kernel describes it (read-only). One try per process: a daemon that fails or dies on it must
+            // not get it again at every reconnect (audit, 20 Oct 2026).
+            if (activeSession == 0 && !CallRegistry.anyCall() && !inventoryTried && Inventory.due()) {
+                inventoryTried = true
+                send("INVENTORY")?.takeIf { it.startsWith("OK") }?.let { Inventory.send(it) }
+                    ?: Log.w(TAG, "inventory: the daemon didn't give it; not again until the app restarts")
+            }
             if (activeSession != 0) send("CALL_START $activeSession")
             true
         } catch (e: Exception) {

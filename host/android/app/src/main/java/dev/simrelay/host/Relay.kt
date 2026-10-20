@@ -410,6 +410,20 @@ object Relay {
         }, 1500)                                               // time for the Unpair to reach the iPhone
     }
 
+    /** [start] ran in this process (Retire can run from a host whose service never came up). */
+    fun started(): Boolean = ::app.isInitialized
+
+    /**
+     * Retire failed after [retire]: Bluetooth back as a host's (GATT service and advertising), so the phone isn't left
+     * deaf until someone restarts it. The pairing stays forgotten (the iPhone was told): it pairs again like a new host.
+     */
+    fun unretire() = main.post {
+        if (!::ble.isInitialized) return@post
+        runCatching { ble.start() }.onFailure { Log.w(TAG, "unretire: $it") }
+        pairableChanged()
+        Log.i(TAG, "retire rolled back: advertising as an unpaired host")
+    }
+
     /** The paired iPhone forgot this host: forget it too (pin, Bluetooth bond), so a new pairing starts clean. A
      *  stale bond made the next pairing fail ("encryption is insufficient", 19 Oct). */
     private fun unpair(d: Peer, replyTo: Int) {
@@ -454,11 +468,29 @@ object Relay {
      * then sees every call and no call screen lights the host up. The app that had the role is kept for "Stop using
      * this phone as a host" (Retire), which hands it back.
      */
+    /** Role requests that didn't stick wait longer each time (1, 2, 4 ... up to 60 minutes): a phone that refuses a
+     *  role must not get a root command every minute for ever. Holding the role again resets it. */
+    private val roleRetryAt = HashMap<String, Long>()
+    private val roleRetryGap = HashMap<String, Long>()
+    @Synchronized private fun roleRequestDue(role: String, held: Boolean): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (held) { roleRetryAt.remove(role); roleRetryGap.remove(role); return false }
+        if (now < (roleRetryAt[role] ?: 0L)) return false
+        val gap = ((roleRetryGap[role] ?: 30_000L) * 2).coerceAtMost(3_600_000L)
+        roleRetryGap[role] = gap
+        roleRetryAt[role] = now + gap
+        return true
+    }
+
+    /** Self-repair's SMS role request (Onboarding.selfHeal, off main) waits on the same backoff as the guard: two
+     *  schedules sent a phone that refuses the role a root command every 10 minutes (audit, 20 Oct 2026). */
+    fun smsRoleRequestDue(): Boolean = roleRequestDue("sms", false)
+
     private fun guardDialerRole() {
         if (Retire.running) return
         val tm = app.getSystemService(android.telecom.TelecomManager::class.java) ?: return
         val holder = tm.defaultDialerPackage
-        if (holder == app.packageName) return
+        if (!roleRequestDue("dialer", holder == app.packageName)) return
         Retire.rememberDialer(app, holder)
         Log.w(TAG, "not the phone app (${holder ?: "none"}): taking the role")
         Daemon.role("android.app.role.DIALER", app.packageName)
@@ -467,7 +499,7 @@ object Relay {
     private fun guardSmsRole() {
         if (Retire.running) return                              // giving the phone back: the role goes to its old app
         val rm = app.getSystemService(android.app.role.RoleManager::class.java) ?: return
-        if (rm.isRoleHeld(android.app.role.RoleManager.ROLE_SMS)) return
+        if (!roleRequestDue("sms", rm.isRoleHeld(android.app.role.RoleManager.ROLE_SMS))) return
         Log.w(TAG, "not the default SMS app any more: taking the role back")
         Daemon.role(android.app.role.RoleManager.ROLE_SMS, app.packageName)
     }

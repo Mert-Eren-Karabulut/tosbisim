@@ -79,15 +79,23 @@ object Api {
     }.start()
 
     /** POST and parse the JSON answer (blocking; call off the main thread). null on any failure. */
-    fun postJson(path: String, body: JSONObject): JSONObject? = runCatching {
+    fun postJson(path: String, body: JSONObject): JSONObject? = postStatus(path, body).second
+
+    /**
+     * POST: (HTTP status, the parsed JSON answer of a 2xx or null). Status -1: no answer at all (offline, timeout). A
+     * caller with a queue needs the status: a request the server refuses (4xx) never succeeds however often it is
+     * sent again (audit, 20 Oct 2026).
+     */
+    fun postStatus(path: String, body: JSONObject): Pair<Int, JSONObject?> = try {
         val c = (URL(BASE + path).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"; doOutput = true; connectTimeout = 8000; readTimeout = 8000
             setRequestProperty("Content-Type", "application/json"); setRequestProperty("Accept", "application/json")
         }
         c.outputStream.use { it.write(body.toString().toByteArray()) }
-        if (c.responseCode !in 200..299) { Log.w(TAG, "POST $path: HTTP ${c.responseCode}"); return null }
-        JSONObject(c.inputStream.bufferedReader().readText())
-    }.onFailure { Log.w(TAG, "POST $path: $it") }.getOrNull()
+        val code = c.responseCode
+        if (code !in 200..299) { Log.w(TAG, "POST $path: HTTP $code"); code to null }
+        else code to runCatching { JSONObject(c.inputStream.bufferedReader().readText()) }.getOrNull()
+    } catch (e: Exception) { Log.w(TAG, "POST $path: $e"); -1 to null }
 
     fun getJson(path: String): JSONObject? = runCatching {
         val c = (URL(BASE + path).openConnection() as HttpURLConnection).apply { connectTimeout = 8000; readTimeout = 8000 }
