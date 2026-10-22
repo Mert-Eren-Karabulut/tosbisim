@@ -200,6 +200,7 @@ message Hotspot {
     bool hidden_ssid = 3;
     bool max_clients = 4;
     bool auto_off = 5;
+    bool off_when_unused = 6;    // understands SetHotspot.off_when_unused_s
   }
 }
 
@@ -271,7 +272,10 @@ message SmsSendResult {
   string error = 3;              // "unconfirmed: ..." = the network never answered (may well be delivered), not a refusal
 }
 
-message SetHotspot { bool on = 1; }
+// on = false with off_when_unused_s > 0: the host turns its hotspot off itself once no device has used it for that
+// long (the iPhone moved to another Wi-Fi and may be asleep when that moment comes). Any later SetHotspot cancels it.
+// Only sent to hosts whose Hotspot.Capabilities.off_when_unused is set: older hosts would turn the hotspot off at once.
+message SetHotspot { bool on = 1; int32 off_when_unused_s = 2; }
 
 // Per-SIM settings from the client. Only the fields that are present are changed.
 message SetSim {

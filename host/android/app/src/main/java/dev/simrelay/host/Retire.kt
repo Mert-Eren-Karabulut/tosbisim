@@ -240,6 +240,7 @@ object Retire {
             |put system dtmf_tone 1
             |if [ "${'$'}(getprop ro.product.manufacturer | tr A-Z a-z)" = samsung ]; then
             |  put system call_end_tone 1; put system call_conn_tone 1; put system volume_waiting_tone 1
+            |  put secure wifi_ap_timeout_setting null      # Samsung's own hotspot timer (the host synced it)
             |fi
             |# Default apps: the ones from before TosbiSim, else the phone's own
             |sms=${'$'}(orig secure sms_default_application); usable "${'$'}sms" || sms=${q(systemSmsApp(app))}

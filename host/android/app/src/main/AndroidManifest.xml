@@ -119,6 +119,8 @@
                 <data android:scheme="tel" />
             </intent-filter>
         </activity>
+        <receiver android:name=".HotspotUnusedReceiver" android:exported="false" />
+        <receiver android:name=".HeartbeatReceiver" android:exported="false" />
         <receiver android:name=".UpdateReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />

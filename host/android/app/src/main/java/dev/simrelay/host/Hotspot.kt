@@ -37,7 +37,10 @@ object Hotspot {
     /** Follow tethering state and connected clients (TetheringEventCallback); [changed] on every change, on main. */
     fun watch(ctx: Context, onChange: () -> Unit) {
         listener = onChange
-        exec.execute { apConfig(ctx, wait = true) }       // Android 11: have the root-read settings ready
+        exec.execute {
+            val cfg = apConfig(ctx, wait = true)          // Android 11: have the root-read settings ready
+            if (cfg != null) syncVendorTimeout(ctx, cfg.autoOff, (cfg.timeoutMs / 60_000L).toInt())
+        }
         dropWpa3(ctx)
         runCatching {
             val tm = ctx.getSystemService("tethering") ?: return
@@ -87,6 +90,7 @@ object Hotspot {
             clients = list
             Log.i(TAG, "hotspot devices: ${list.size}")
             changed()
+            if (offUnusedMs > 0) main.post { checkUnused() }
         }
     }
 
@@ -94,6 +98,72 @@ object Hotspot {
     fun clientCount(): Int = clients.size
 
     fun clearClients() { if (clients.isNotEmpty()) { clients = emptyList(); changed() } }
+
+    /**
+     * Samsung runs its own "turn the hotspot off when nothing is connected" timer next to Android's (secure setting
+     * wifi_ap_timeout_setting, minutes, 0 = never; the carrier default is 20). It switched the hotspot off after 20 idle
+     * minutes while TosbiSim's auto off was off (22 Oct 2026): it follows TosbiSim's setting now. Other makers: no-op.
+     */
+    private fun syncVendorTimeout(ctx: Context, autoOff: Boolean, minutes: Int) {
+        if (!android.os.Build.MANUFACTURER.equals("samsung", ignoreCase = true)) return
+        val want = if (autoOff) minutes.coerceIn(1, 60) else 0
+        runCatching {
+            val cr = ctx.contentResolver
+            if (android.provider.Settings.Secure.getInt(cr, "wifi_ap_timeout_setting", -1) == want) return
+            android.provider.Settings.Secure.putInt(cr, "wifi_ap_timeout_setting", want)
+            Log.i(TAG, "Samsung hotspot timeout -> ${if (want == 0) "never" else "$want min"} (TosbiSim's auto off)")
+        }.onFailure { Log.w(TAG, "Samsung hotspot timeout: $it") }
+    }
+
+    // ---- off once unused (SetHotspot.off_when_unused_s)
+    // The iPhone's automatic hotspot moved to another Wi-Fi: the hotspot goes off once no device has used it for a
+    // while. The iPhone used to wait for that minute itself, but iOS gives a background app no network events: it
+    // went off only when something next woke the iPhone (13 minutes late, 22 Oct 2026). The host holds the timer,
+    // with an alarm that fires in deep sleep too. Any later SetHotspot cancels it.
+    @Volatile private var offUnusedMs = 0L
+    @Volatile private var unusedSince = 0L
+    @Volatile private var appCtx: Context? = null
+    private val unusedTick = Runnable { checkUnused() }
+
+    fun offWhenUnused(ctx: Context, seconds: Int) {
+        appCtx = ctx.applicationContext
+        offUnusedMs = seconds.coerceIn(30, 3600) * 1000L
+        unusedSince = 0
+        Log.i(TAG, "hotspot: off once unused for ${offUnusedMs / 1000} s")
+        main.post { checkUnused() }
+    }
+
+    fun cancelOffWhenUnused() {
+        if (offUnusedMs == 0L) return
+        offUnusedMs = 0
+        main.removeCallbacks(unusedTick)
+        Log.i(TAG, "hotspot: off-when-unused cancelled")
+    }
+
+    /** Main thread (or the wake-up alarm): turn off once unused long enough, else look again shortly. */
+    fun checkUnused() {
+        val ctx = appCtx ?: return
+        if (offUnusedMs == 0L) return
+        if (!isOn(ctx)) { offUnusedMs = 0; return }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (clients.isNotEmpty()) unusedSince = 0 else if (unusedSince == 0L) unusedSince = now
+        val left = if (unusedSince == 0L) offUnusedMs else offUnusedMs - (now - unusedSince)
+        if (unusedSince != 0L && left <= 0) {
+            offUnusedMs = 0
+            Log.i(TAG, "hotspot off: unused for ${(now - unusedSince) / 1000} s (the iPhone is on another Wi-Fi)")
+            set(ctx, false) { _, _ -> }
+            return
+        }
+        main.removeCallbacks(unusedTick)
+        main.postDelayed(unusedTick, 15_000)
+        // A main-thread timer stops in deep sleep: an alarm allowed while idle wakes us for the deadline
+        runCatching {
+            val am = ctx.getSystemService(android.app.AlarmManager::class.java)
+            val pi = android.app.PendingIntent.getBroadcast(ctx, 0, android.content.Intent(ctx, HotspotUnusedReceiver::class.java),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+            am.setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, now + maxOf(left, 15_000L), pi)
+        }.onFailure { Log.w(TAG, "hotspot unused alarm: $it") }
+    }
 
     // TetheredClient -> (name, mac). Never drop a client because a field can't be read: the automatic
     // hotspot relies on "nothing connected" being right.
@@ -193,7 +263,7 @@ object Hotspot {
      * has WPA3, its hotspot refuses SAE and silently never starts) and nobody needs them for a phone-to-phone link.
      */
     private fun capabilities(wm: WifiManager): HotspotMsg.Capabilities {
-        val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(true).setAutoOff(true)
+        val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(true).setAutoOff(true).setOffWhenUnused(true)
         b.addBands(HotspotMsg.Band.BAND_2GHZ)
         if (wm.is5GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_5GHZ).addBands(HotspotMsg.Band.BAND_AUTO)
         if (wm.is6GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_6GHZ)
@@ -242,6 +312,7 @@ object Hotspot {
                     if (c.autoOff) "1" else "0", "${if (c.autoOff && c.autoOffMinutes > 0) c.autoOffMinutes * 60_000L else 0L}")
                     ?: error("the phone rejected these settings")
                 rootCfg = null
+                syncVendorTimeout(ctx, c.autoOff, c.autoOffMinutes)
                 Log.i(TAG, "hotspot config saved as root (Android 11) band=${c.band} sec=${c.security} (was on: $wasOn)")
                 if (wasOn) restart(ctx, reply) else done(true, "saved")
                 return
@@ -268,6 +339,7 @@ object Hotspot {
             Log.i(TAG, "hotspot config saved=$ok band=${c.band} sec=${c.security} hidden=${c.hidden} " +
                     "max=${c.maxClients} autoOff=${c.autoOff}/${c.autoOffMinutes}min (was on: $wasOn)")
             if (!ok) error("the phone rejected these settings")
+            syncVendorTimeout(ctx, c.autoOff, c.autoOffMinutes)
             if (wasOn) restart(ctx, reply) else done(true, "saved")
         }.onFailure { done(false, cause(it).message ?: cause(it).toString()) }
     }
@@ -305,6 +377,7 @@ object Hotspot {
      */
     fun set(ctx: Context, on: Boolean, reply: (Boolean, String) -> Unit) {
         val done: (Boolean, String) -> Unit = { ok, d -> main.post { reply(ok, d) } }     // answers come on main
+        if (on) cancelOffWhenUnused()
         val now = android.os.SystemClock.elapsedRealtime()
         val isOn = isOn(ctx)
         if (on && (isOn || now - startingSince < 15_000)) {
@@ -356,4 +429,9 @@ object Hotspot {
     }
 
     private fun cause(t: Throwable): Throwable = (t as? InvocationTargetException)?.targetException ?: t
+}
+
+/** Hotspot.checkUnused's deep-sleep wake-up (an alarm allowed while idle). */
+class HotspotUnusedReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(c: Context, i: android.content.Intent) { Bg.guard("hotspot-unused") { Hotspot.checkUnused() } }
 }

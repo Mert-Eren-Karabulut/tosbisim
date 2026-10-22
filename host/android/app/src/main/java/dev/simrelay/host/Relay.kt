@@ -134,6 +134,7 @@ object Relay {
         Sims.watch(app) { Sims.protectNewSims(app); Sims.log(app); statusChanged() }
         Sims.attemptsKnown = { main.post { statusChanged() } }
         main.postDelayed(keepAlive, KEEPALIVE_MS)
+        scheduleHeartbeat()
         main.postDelayed({ guardSmsRole(); guardDialerRole() }, 20_000)   // after the daemon is up (service.sh claims SMS 90 s after boot too)
         Log.i(TAG, "relay up; pinned client=${pinned() ?: "none"}")
     }
@@ -299,6 +300,10 @@ object Relay {
             Envelope.BodyCase.DIAGNOSTICS_REQUEST -> sendDiagnostics(d, env.diagnosticsRequest.maxBytes)
             Envelope.BodyCase.UNPAIR -> unpair(d, env.seq)
             Envelope.BodyCase.SET_HOTSPOT -> {
+                if (!env.setHotspot.on && env.setHotspot.offWhenUnusedS > 0) {     // the host keeps the timer
+                    Hotspot.offWhenUnused(app, env.setHotspot.offWhenUnusedS); return
+                }
+                Hotspot.cancelOffWhenUnused()
                 // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
                 if (env.setHotspot.on && !bleNear() && CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED })
                     return error(d, env.seq, Error.Code.BAD_REQUEST, "hotspot: after the call")
@@ -572,8 +577,33 @@ object Relay {
         Log.i(TAG, "diagnostics sent to the client: ${log.length} chars in ${parts.size} parts")
     }.start()
 
+    /**
+     * The keep-alive is the iPhone's wake-up call too (its automatic hotspot and liveness checks run on it), but the
+     * main-thread timer stops while the host is in deep sleep: it ran ~3 times an hour, and the iPhone's automatic
+     * hotspot waited for something else to wake it (22 Oct 2026). An alarm allowed while idle runs it every few
+     * minutes in deep sleep; while awake the timer runs it and the alarm does nothing.
+     */
+    @Volatile private var lastKeepAliveAt = 0L
+    private const val HEARTBEAT_MS = 3 * 60_000L
+    fun heartbeat() = main.post {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastKeepAliveAt > KEEPALIVE_MS + 30_000L) {
+            Log.i(TAG, "heartbeat: keep-alive while asleep")
+            main.removeCallbacks(keepAlive)
+            keepAlive.run()
+        }
+        scheduleHeartbeat()
+    }
+    private fun scheduleHeartbeat() = runCatching {
+        val am = app.getSystemService(android.app.AlarmManager::class.java)
+        val pi = android.app.PendingIntent.getBroadcast(app, 1, android.content.Intent(app, HeartbeatReceiver::class.java),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+        am.setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + HEARTBEAT_MS, pi)
+    }.onFailure { Log.w(TAG, "heartbeat alarm: $it") }
+
     private val keepAlive = object : Runnable {
         override fun run() {
+            lastKeepAliveAt = SystemClock.elapsedRealtime()
             askForHello()
             HostWifi.evaluate("keep-alive")
             guardSmsRole()
@@ -615,4 +645,9 @@ object Relay {
 object BuildConfigInfo {
     fun version(ctx: Context): String =
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
+}
+
+/** Relay's deep-sleep heartbeat (an alarm allowed while idle): the keep-alive runs even when the main timer can't. */
+class HeartbeatReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(c: android.content.Context, i: android.content.Intent) { Bg.guard("heartbeat") { Relay.heartbeat() } }
 }

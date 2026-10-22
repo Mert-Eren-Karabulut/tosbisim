@@ -38,8 +38,8 @@ android {
         applicationId = "dev.simrelay.host"
         minSdk = 30
         targetSdk = 33   // TODO(M6): 34+ needs foregroundServiceType declarations
-        versionCode = 43
-        versionName = "0.12.7"
+        versionCode = 44
+        versionName = "0.12.8"
     }
     sourceSets["main"].apply {
         // Device profiles (repo-root profiles/) ship as assets, e.g. assets/qcom/sm8250-samsung-r8q.json

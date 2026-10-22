@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.8",
+    "code": 44,
+    "en": "Automatic hotspot is more dependable while your iPhone sleeps: when your iPhone moves to another Wi-Fi, the host itself turns the hotspot off once nothing uses it for a minute, and the host checks in with your iPhone every few minutes even in deep sleep. On Samsung hosts, the phone's own 20-minute hotspot timer now follows TosbiSim's auto off setting.",
+    "tr": "Otomatik erişim noktası iPhone'unuz uykudayken daha güvenilir: iPhone'unuz başka bir Wi-Fi'a geçince ana cihaz, bir dakika boyunca hiçbir şey kullanmadığında erişim noktasını kendisi kapatıyor; ana cihaz derin uykuda da birkaç dakikada bir iPhone'unuzla haberleşiyor. Samsung ana cihazlarda telefonun kendi 20 dakikalık erişim noktası zamanlayıcısı artık TosbiSim'in otomatik kapatma ayarına uyuyor."
+  },
+  {
     "version": "0.12.7",
     "code": 43,
     "en": "Calls that start while your iPhone is reconnecting no longer go silent half-way: when Bluetooth comes back, the call's audio moves to it cleanly.\nSafer and sturdier: a restart right after a call no longer leaves the host unprotected; call audio settings are put back even if the background service is stopped mid-call; one rejected report can no longer block diagnostics.\n\"Stop using this phone as a host\" checks everything first and puts the host back as it was if it can't finish; it waits until a call is over.\nClearer setup screen: Magisk-zip instructions, PUK and carrier-lock messages, box mode \"paused until\", better contrast and screen-reader support.\nThe charge limit holds even if the phone switches charging back on by itself.",

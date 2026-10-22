@@ -24,7 +24,8 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
       mkdir -p /data/adb/tosbisim
       for k in system/vibrate_when_ringing system/haptic_feedback_enabled system/sound_effects_enabled \
                system/lockscreen_sounds_enabled system/dtmf_tone system/call_end_tone system/call_conn_tone \
-               system/volume_waiting_tone global/zen_mode secure/sms_default_application secure/dialer_default_application; do
+               system/volume_waiting_tone global/zen_mode secure/sms_default_application secure/dialer_default_application \
+               secure/wifi_ap_timeout_setting; do
         echo "${k%%/*} ${k#*/} $(settings get ${k%%/*} ${k#*/})"
       done > "$ORIG.tmp" && mv -f "$ORIG.tmp" "$ORIG"
     fi
