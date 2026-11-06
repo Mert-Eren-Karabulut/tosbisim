@@ -155,6 +155,7 @@ object Retire {
             progress(R.string.retire_step_settings)
             boxWasOn = Box.on
             await { done -> main.post { if (Box.on) Box.set(false); done() } }
+            await { done -> main.post { HotspotPause.forget(); done() } }   // a paused hotspot must not come back after the call
             if (Hotspot.isOn(app)) await { done -> Hotspot.set(app, false) { _, _ -> done() } }
             restoreSound(app)
             if (Daemon.isStarted()) await { done -> Daemon.query("STATUS") { done() } }   // box mode's daemon commands have run

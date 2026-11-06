@@ -139,6 +139,7 @@ object Hotspot {
 
     fun offWhenUnused(ctx: Context, seconds: Int) {
         appCtx = ctx.applicationContext
+        if (HotspotPause.deferOffWhenUnused(seconds.coerceIn(30, 3600))) return     // counted from when it's back on
         val ms = seconds.coerceIn(30, 3600) * 1000L
         if (ms == offUnusedMs) return                  // already counting: the iPhone asks again after a reconnect
         offUnusedMs = ms
@@ -146,6 +147,9 @@ object Hotspot {
         Log.i(TAG, "hotspot: off once unused for ${offUnusedMs / 1000} s")
         main.post { checkUnused() }
     }
+
+    /** The "off once unused" countdown running now, in seconds (0: none): a call pause carries it over. */
+    fun offWhenUnusedSeconds(): Int = (offUnusedMs / 1000).toInt()
 
     fun cancelOffWhenUnused() {
         if (offUnusedMs == 0L) return
@@ -208,9 +212,23 @@ object Hotspot {
     @Volatile private var rootCfg: Pair<ApCfg, Long>? = null
     @Volatile private var rootCfgLoading = false
 
-    /** On, starting or restarting with new settings: the host Wi-Fi rule must not switch Wi-Fi on in the gap. */
-    fun isOnOrStarting(ctx: Context): Boolean =
+    /** On, starting, restarting with new settings or paused for a call: the host Wi-Fi rule must not switch Wi-Fi on in the gap. */
+    fun isOnOrStarting(ctx: Context): Boolean = upOrStarting(ctx) || HotspotPause.paused
+
+    /** The radio's own state: on, starting or restarting with new settings (a call pause doesn't count). */
+    fun upOrStarting(ctx: Context): Boolean =
         isOn(ctx) || whenDown != null || android.os.SystemClock.elapsedRealtime() - startingSince < 15_000
+
+    /**
+     * Pause during calls is offered (HotspotPause): this host relays call audio, and its hotspot can only use 2.4 GHz,
+     * the band its Bluetooth uses too. A host that can run its hotspot on 5 GHz keeps the two apart: there the band is
+     * the answer, not pausing.
+     */
+    fun callPauseOffered(ctx: Context): Boolean = testOffered ?: (VoiceGate.fullVoice &&
+        runCatching { !ctx.getSystemService(WifiManager::class.java).is5GHzBandSupported }.getOrDefault(false))
+
+    /** adb test hook (HostService PAUSE_TEST, root only, this process only): pretend the host is (not) offered it. */
+    @Volatile var testOffered: Boolean? = null
 
     /** On or off (cheap: no settings read, never a root call). */
     fun isOn(ctx: Context): Boolean = runCatching {
@@ -275,7 +293,8 @@ object Hotspot {
             .setHidden(cfg.hidden).setMaxClients(cfg.maxClients)
             .setAutoOff(cfg.autoOff).setAutoOffMinutes((cfg.timeoutMs / 60_000L).toInt())
             .addAllClients(if (on) clients else emptyList())
-            .setCapabilities(runCatching { capabilities(wm) }.getOrDefault(HotspotMsg.Capabilities.getDefaultInstance()))
+            .setCapabilities(runCatching { capabilities(ctx, wm) }.getOrDefault(HotspotMsg.Capabilities.getDefaultInstance()))
+            .setCallPause(HotspotPause.setting && callPauseOffered(ctx)).setPausedForCall(HotspotPause.paused && !on)
             .setUsage(DataUsage.usage())
             .build()
     }.getOrElse { Log.w(TAG, "hotspot info unavailable: ${cause(it)}"); HotspotMsg.newBuilder().setSupported(false).build() }
@@ -290,8 +309,9 @@ object Hotspot {
      * and a device limit (Android won't start a hotspot with a limit unless the hotspot hardware can disconnect
      * clients, SoftApCapability CLIENT_FORCE_DISCONNECT, which the S20 FE's lacks; apps can't read the capability).
      */
-    private fun capabilities(wm: WifiManager): HotspotMsg.Capabilities {
+    private fun capabilities(ctx: Context, wm: WifiManager): HotspotMsg.Capabilities {
         val b = HotspotMsg.Capabilities.newBuilder().setHiddenSsid(true).setMaxClients(false).setAutoOff(true).setOffWhenUnused(true)
+            .setCallPause(callPauseOffered(ctx))
         b.addBands(HotspotMsg.Band.BAND_2GHZ)
         if (wm.is5GHzBandSupported) b.addBands(HotspotMsg.Band.BAND_5GHZ).addBands(HotspotMsg.Band.BAND_AUTO)
         if (wm.is5GHzBandSupported && android.os.Build.VERSION.SDK_INT >= 31 && wm.isBridgedApConcurrencySupported) b.addBands(HotspotMsg.Band.BAND_DUAL_2_5)

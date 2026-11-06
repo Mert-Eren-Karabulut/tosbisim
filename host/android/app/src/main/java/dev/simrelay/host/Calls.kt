@@ -85,7 +85,9 @@ object CallRegistry {
         val active = byId.values.filter { it.stateCompat == Call.STATE_ACTIVE }
         val dialing = byId.values.filter { it.stateCompat == Call.STATE_DIALING }
         val audible = active.firstOrNull(::isOwned) ?: active.firstOrNull() ?: dialing.firstOrNull(::isOwned) ?: dialing.firstOrNull()
-        if (audible != null && isOwned(audible) && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })) {
+        val relayed = audible != null && isOwned(audible) && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })
+        HotspotPause.calls(relayed, live = liveCalls())
+        if (relayed && audible != null) {
             BasicSilence.set(app, false)
             Daemon.callActive(Daemon.profile()?.sessionForSlot(maxOf(slotOf(audible), 0)) ?: (maxOf(slotOf(audible), 0) + 1),
                 connected = audible.stateCompat == Call.STATE_ACTIVE)
@@ -107,7 +109,11 @@ object CallRegistry {
         if (!dialingPhase()) RootCallState.stop()
         disown(call, id)
         if (byId.values.none { it.stateCompat == Call.STATE_ACTIVE || it.stateCompat == Call.STATE_DIALING }) Daemon.callIdle()
+        HotspotPause.calls(relayed = false, live = liveCalls())     // a call that's still relayed says so at its next change
     }
+
+    /** Any call not yet over (a held one counts: the hotspot stays paused through a hold). */
+    private fun liveCalls() = byId.values.any { it.stateCompat != Call.STATE_DISCONNECTED }
 
     private fun send(call: Call) {
         val e = event(call)

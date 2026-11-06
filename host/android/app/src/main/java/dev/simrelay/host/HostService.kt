@@ -121,7 +121,16 @@ class HostService : Service() {
                 else -> Log.i(TAG, "WIFI status: ${HostWifi.status().let { "on=${it.on} reason=${it.reason} away=${it.useWhenAway} saved=${it.savedCount} connected=${it.connectedSsid.isNotEmpty()}" }} " +
                     "hotspot=${Hotspot.isOn(this)} uplink=${HostWifi.uplinkKind()} override=${HostWifi.clientOverride}")
             }
-            "HOTSPOT" -> Hotspot.set(this, intent.getBooleanExtra("on", false)) { ok, d -> Log.i(TAG, "HOTSPOT -> ok=$ok $d") }
+            "HOTSPOT" -> { HotspotPause.userSwitched(intent.getBooleanExtra("on", false))
+                Hotspot.set(this, intent.getBooleanExtra("on", false)) { ok, d -> Log.i(TAG, "HOTSPOT -> ok=$ok $d") } }
+            // adb test of the call pause without a relayed call (emulators have no call audio): --es offered yes|no|real
+            // (this process only) and/or --es call start|end (what CallRegistry reports for a relayed call)
+            "PAUSE_TEST" -> {
+                when (intent.getStringExtra("offered")) { "yes" -> Hotspot.testOffered = true; "no" -> Hotspot.testOffered = false; "real" -> Hotspot.testOffered = null }
+                when (intent.getStringExtra("call")) { "start" -> HotspotPause.calls(true, true); "end" -> HotspotPause.calls(false, false) }
+                Log.i(TAG, "PAUSE_TEST: offered=${Hotspot.callPauseOffered(this)} setting=${HotspotPause.setting} paused=${HotspotPause.paused} hotspot=${Hotspot.isOn(this)}")
+                Relay.voiceChanged()
+            }
             // adb debug: build the automatic profile even if a shipped one exists, and log it
             // adb debug: one raw daemon command, e.g. -a DAEMON --es cmd "TUNE 2 1 240"; the answer goes to the log
             "DAEMON" -> intent.getStringExtra("cmd")?.let { c -> Daemon.query(c) { r -> Log.i(TAG, "DAEMON $c -> $r") } }

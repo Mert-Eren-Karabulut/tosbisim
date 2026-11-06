@@ -65,6 +65,7 @@ object Relay {
     @Volatile private var pairingUntil = 0L
     private var kaN = 0
     private var lastHotspotOn = false
+    private var lastHotspotRadio = false
     private val pairExec = Bg.single("pairing")
 
     private var relayStarted = false
@@ -97,12 +98,16 @@ object Relay {
         MobileData.watch(app) { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 800) }
         Updater.start(app) { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 500) }
 
-        // Hotspot on/off, connected clients and data usage -> push status to the client (debounced).
+        // Hotspot on/off, connected clients and data usage -> push status to the client (debounced). Box mode and the
+        // Wi-Fi rule see a hotspot paused for a call as on: no network-mode or Wi-Fi change in the middle of the call.
         val statusChanged = {
-            val hsOn = Hotspot.isOn(app)
+            val radio = Hotspot.isOn(app)
+            if (radio != lastHotspotRadio) { lastHotspotRadio = radio; HotspotPause.hotspotChanged(radio) }
+            val hsOn = radio || HotspotPause.paused
             if (hsOn != lastHotspotOn) { lastHotspotOn = hsOn; Box.hotspotChanged(hsOn); HostWifi.evaluate("hotspot ${if (hsOn) "on" else "off"}") }
             main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250); Unit   // widgets: as fast as it's sane
         }
+        HotspotPause.init(app, ::bleNear) { main.removeCallbacks(pushStatus); main.postDelayed(pushStatus, 250) }
         Box.start(app, statusChanged)
         // Battery level / charging changes reach the iPhone (app and widget) right away, not with the next other update.
         var lastBattery = -1 to false
@@ -258,6 +263,7 @@ object Relay {
             Log.i(TAG, "client ${d.address} gone")
             main.post {
                 HostWifi.evaluate("Bluetooth gone")
+                HotspotPause.transportChanged("Bluetooth gone")
                 // The internet room serves now. What Bluetooth still had queued, or would have carried meanwhile, went with
                 // the link, and the iPhone, already in the room, says no new Hello there: a call's end or a text was lost
                 // until the next one (audit, 1 Nov 2026).
@@ -342,6 +348,7 @@ object Relay {
                 // Starting the hotspot can take the host off Wi-Fi, which may carry this internet call (18 Oct).
                 if (env.setHotspot.on && !bleNear() && CallRegistry.snapshot().any { it.state != CallEvent.State.ENDED })
                     return error(d, env.seq, Error.Code.BAD_REQUEST, "hotspot: after the call")
+                HotspotPause.userSwitched(env.setHotspot.on)        // the user's switch wins over a call pause
                 Hotspot.set(app, env.setHotspot.on) { ok, detail ->
                     if (!ok) error(d, env.seq, Error.Code.INTERNAL, "hotspot: $detail")
                     // The AP state change itself pushes status (Hotspot.watch); this catches a settle without one.
@@ -351,6 +358,11 @@ object Relay {
                 // A start Android accepted can still die before the AP is up (no state change then): end "Starting…"
                 // as soon as its 15 s window closes.
                 if (env.setHotspot.on) main.postDelayed(pushStatus, 15_500)
+            }
+            Envelope.BodyCase.SET_HOTSPOT_CALL_PAUSE -> {
+                if (env.setHotspotCallPause.on && !Hotspot.callPauseOffered(app))
+                    return error(d, env.seq, Error.Code.BAD_REQUEST, "hotspot: pausing during calls is only for hosts whose hotspot can only use 2.4 GHz")
+                HotspotPause.setSetting(env.setHotspotCallPause.on)
             }
             Envelope.BodyCase.SET_HOST_WIFI -> HostWifi.setUseWhenAway(env.setHostWifi.useWhenAway, remote = d !is Peer.Ble)
             // Network names and passwords travel over Bluetooth only (18 Oct).
@@ -424,6 +436,7 @@ object Relay {
         trusted.add(d.id)
         if (d is Peer.Ble) {
             HostWifi.evaluate("Bluetooth up")
+            HotspotPause.transportChanged("Bluetooth back")
             // Remembered so the same iPhone can pair again on its own after iOS dropped its keys (see the receiver)
             app.getSharedPreferences("relay", Context.MODE_PRIVATE).edit().putString("client_mac", d.id).apply()
         }

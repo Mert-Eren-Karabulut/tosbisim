@@ -19,6 +19,10 @@ write-with-response preserve order). Concatenate the payloads and split into fra
 `[u16 little-endian length][Envelope protobuf bytes]`, max frame 4096 bytes. A frame may span several
 notifications or writes (MTU is typically 185-517 on iOS, 517 on Android). Reset both stream buffers on reconnect.
 
+Call audio (L2CAP CoC on `AUDIO_PSM`) is a byte stream of `[u16 LE length][u16 seq LE][u8 flags][opus]` packets,
+10 ms each. A sender puts every packet waiting into one write (one L2CAP SDU on Android): a link that carries one SDU per
+connection event can't take 100 single-packet writes a second. Receivers parse the stream, never one packet per read.
+
 ## Session rules
 - After subscribing to `CTRL_TX`, the client sends `Hello`; the host answers `Hello` + `HostStatus`,
   then replays undelivered `SmsReceived` and the state of any ongoing call (`CallEvent`).

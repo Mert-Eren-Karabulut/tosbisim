@@ -7,9 +7,12 @@ import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
+import android.os.SystemClock
 import android.util.Log
 import java.io.DataInputStream
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
 
 /**
  * Closes a daemon audio socket so both ends notice at once. close() alone leaves the socket open while one of our
@@ -35,7 +38,10 @@ internal fun LocalSocket.closeNow() {
  */
 @SuppressLint("MissingPermission")
 class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLink) {
-    companion object { private const val TAG = "SimRelayHost"; private const val MAX = 512 }
+    companion object {
+        private const val TAG = "SimRelayHost"; private const val MAX = 512
+        private const val BACKLOG = 10            // 100 ms of caller audio waiting for the link, then the oldest goes
+    }
 
     private var server: BluetoothServerSocket? = null
     @Volatile private var acceptThread: Thread? = null
@@ -95,23 +101,75 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         val alive = AtomicBoolean(true)
         val ds = daemon
 
-        // daemon -> L2CAP: each datagram becomes one length-prefixed frame.
+        // daemon -> L2CAP: each datagram becomes one length-prefixed frame, and every frame waiting goes out in ONE
+        // write. On Android one write is one L2CAP packet: a link that carries one packet per connection event (11.25
+        // ms) can't take 100 single-frame writes a second. The write then blocked, the daemon's socket filled and it
+        // dropped what didn't fit, silently: a client got 88 frames a second, steadily, through whole calls (a Mi 11
+        // Pro host with a Meizu client, 6 Nov 2026). The reader keeps the daemon drained; the backlog stays short.
+        val q = ArrayDeque<ByteArray>()
+        val qLock = ReentrantLock()
+        val ready = qLock.newCondition()
+        val st = IntArray(5)                         // frames in, frames out, writes, dropped, slowest write (ms)
         val down = Thread({
             val din = ds.inputStream
-            val out = l2cap.outputStream
             val buf = ByteArray(MAX)
-            val framed = ByteArray(MAX + 2)
+            var stallLogged = 0L
             try {
                 while (alive.get()) {
                     val n = din.read(buf)
                     if (n <= 0) break
+                    val framed = ByteArray(n + 2)
                     framed[0] = (n and 0xff).toByte()
                     framed[1] = (n shr 8).toByte()
                     System.arraycopy(buf, 0, framed, 2, n)
-                    synchronized(out) { out.write(framed, 0, n + 2); out.flush() }
+                    var dropped = false
+                    qLock.lock()
+                    try {
+                        q.addLast(framed); st[0]++
+                        while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true }
+                        ready.signal()
+                    } finally { qLock.unlock() }
+                    // A write that never returns logs nothing itself: say so from here (a client got no caller audio
+                    // for 15 s while its own audio still reached the host, 6 Nov 2026)
+                    val now = SystemClock.elapsedRealtime()
+                    if (dropped && now - stallLogged > 5000) { stallLogged = now; Log.w(TAG, "audio to the phone: Bluetooth isn't taking it, dropping the oldest") }
+                }
+            } catch (_: Exception) {} finally { alive.set(false); qLock.lock(); try { ready.signalAll() } finally { qLock.unlock() } }
+        }, "audio-down").apply { isDaemon = true; start() }
+        val send = Thread({
+            val out = l2cap.outputStream
+            val maxTx = runCatching { l2cap.maxTransmitPacketSize }.getOrDefault(0).let { if (it in 64..4096) it else MAX + 2 }
+            val buf = ByteArray(maxOf(maxTx, MAX + 2))
+            var nextLog = SystemClock.elapsedRealtime() + 5000
+            try {
+                while (alive.get()) {
+                    var n = 0; var frames = 0
+                    qLock.lock()
+                    try {
+                        while (q.isEmpty() && alive.get()) ready.await(200, TimeUnit.MILLISECONDS)
+                        while (q.isNotEmpty() && (n == 0 || n + q.first().size <= maxTx)) {
+                            val f = q.removeFirst(); System.arraycopy(f, 0, buf, n, f.size); n += f.size; frames++
+                        }
+                    } finally { qLock.unlock() }
+                    if (n == 0) continue
+                    val t0 = SystemClock.elapsedRealtime()
+                    out.write(buf, 0, n)
+                    val ms = (SystemClock.elapsedRealtime() - t0).toInt()
+                    qLock.lock()
+                    try {
+                        st[1] += frames; st[2]++; if (ms > st[4]) st[4] = ms
+                        if (t0 > nextLog) {
+                            nextLog = t0 + 5000
+                            // Only when the link lagged (frames shared a write, a drop, a slow write): healthy calls
+                            // already log every 5 s in the daemon's line
+                            if (st[3] > 0 || st[2] < st[1] || st[4] >= 40)
+                                Log.i(TAG, "audio to the phone 5s: frames=${st[1]}/${st[0]} writes=${st[2]} dropped=${st[3]} slowest write=${st[4]} ms (max $maxTx B)")
+                            st.fill(0)
+                        }
+                    } finally { qLock.unlock() }
                 }
             } catch (_: Exception) {} finally { alive.set(false) }
-        }, "audio-down").apply { isDaemon = true; start() }
+        }, "audio-send").apply { isDaemon = true; start() }
 
         // L2CAP -> daemon: de-frame, forward each packet as one datagram.
         try {
@@ -129,9 +187,10 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         } catch (_: Exception) {
         } finally {
             alive.set(false)
+            qLock.lock(); try { ready.signalAll() } finally { qLock.unlock() }
             runCatching { l2cap.close() }
             ds.closeNow()
-            down.join(500)
+            down.join(500); send.join(500)
             Log.i(TAG, "audio bridge down")
         }
     }

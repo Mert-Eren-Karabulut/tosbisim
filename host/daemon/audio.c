@@ -186,6 +186,8 @@ static int g_io_started = 0;
 
 // Stats (reset each 5 s log line).
 static unsigned g_st_sent, g_st_recv, g_st_plc, g_st_fec, g_st_late, g_st_catchup, g_st_caperr;
+// Packets the audio client's socket had no room for (EAGAIN): its reader fell behind, they were dropped (capture thread).
+static unsigned g_st_txdrop;
 static int g_st_peak;
 // Totals since the call began, for the call test (AUDIO?): did the caller's voice reach us, did we play into the call.
 static volatile unsigned g_tot_cap, g_tot_voiced, g_tot_sent, g_tot_played;
@@ -222,8 +224,10 @@ static void client_set(int fd) {
 static void client_send(const uint8_t *buf, int len) {
     pthread_mutex_lock(&g_client_lock);
     int fd = g_client;
-    if (fd >= 0 && send(fd, buf, len, MSG_DONTWAIT | MSG_NOSIGNAL) < 0 && errno != EAGAIN)
-        LOGW("audio send: %s", strerror(errno));
+    if (fd >= 0 && send(fd, buf, len, MSG_DONTWAIT | MSG_NOSIGNAL) < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) g_st_txdrop++;
+        else LOGW("audio send: %s", strerror(errno));
+    }
     pthread_mutex_unlock(&g_client_lock);
 }
 
@@ -525,14 +529,14 @@ static void *capture_main(void *arg) {
         if (frames >= 500) {     // ~5 s
             struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
             double s = (now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1e9;
-            LOGI("audio 5s: sent=%u recv=%u fec=%u plc=%u late=%u catchup=%u caperr=%u peak=%d played=%u depthmax=%u (%.1f fps) "
+            LOGI("audio 5s: sent=%u txdrop=%u recv=%u fec=%u plc=%u late=%u catchup=%u caperr=%u peak=%d played=%u depthmax=%u (%.1f fps) "
                  "| held: jb=%.1fms reopen=%u (tune prime=%d keep=%d period=%d)",
-                 g_st_sent, g_st_recv, g_st_fec, g_st_plc, g_st_late, g_st_catchup, g_st_caperr, g_st_peak,
+                 g_st_sent, g_st_txdrop, g_st_recv, g_st_fec, g_st_plc, g_st_late, g_st_catchup, g_st_caperr, g_st_peak,
                  g_st_played, g_st_depth_max, frames / s,
                  g_st_jb_n ? g_st_jb_sum / g_st_jb_n * 10.0 : -1.0, g_st_reopen,
                  g_jb_prime, g_jb_keep, g_play_period);
             g_st_jb_sum = 0; g_st_jb_n = 0; g_st_reopen = 0;
-            g_st_sent = g_st_recv = g_st_fec = g_st_plc = g_st_late = g_st_catchup = g_st_caperr = 0;
+            g_st_sent = g_st_txdrop = g_st_recv = g_st_fec = g_st_plc = g_st_late = g_st_catchup = g_st_caperr = 0;
             g_st_peak = 0; g_st_played = 0; g_st_depth_max = 0;
             frames = 0; t0 = now;
         }

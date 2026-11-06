@@ -50,6 +50,7 @@ message Envelope {
     Diagnostics diagnostics = 62;                // host -> client (reply)
     Unpair unpair = 63;                          // client -> host: "forget this host" on the phone (host -> client: its answer, or unasked: the host was removed)
     PushSetup push_setup = 64;                   // client -> host, over Bluetooth only: the push wake-up key
+    SetHotspotCallPause set_hotspot_call_pause = 65; // client -> host: Hotspot.call_pause (only where capabilities.call_pause)
   }
 }
 
@@ -186,6 +187,11 @@ message Hotspot {
   bool starting = 14;            // turning on right now (status only): show "Starting", not off
   string gateway = 15;           // the hotspot's own IPv4 address while on (status only): lets the client tell
                                  // it's on this hotspot without reading Wi-Fi names (iOS hides them; Android needs location for them)
+  // Pause during calls (offered only where capabilities.call_pause): while a call's audio is on Bluetooth the host turns
+  // the hotspot off, and back on when the call ends. Set with SetHotspotCallPause, not SetHotspotConfig.
+  bool call_pause = 16;
+  bool paused_for_call = 17;     // off right now for a call, back on when it ends (status only). The user turning the
+                                 // hotspot on during the call wins: it stays on for the rest of that call.
 
   enum Band { BAND_UNSPECIFIED = 0; BAND_2GHZ = 1; BAND_5GHZ = 2; BAND_6GHZ = 3; BAND_AUTO = 4; BAND_DUAL_2_5 = 5; }
   enum Security { SECURITY_UNSPECIFIED = 0; OPEN = 1; WPA2 = 2; WPA3_TRANSITION = 3; WPA3 = 4; }
@@ -203,6 +209,9 @@ message Hotspot {
     bool max_clients = 4;
     bool auto_off = 5;
     bool off_when_unused = 6;    // understands SetHotspot.off_when_unused_s
+    // Pause during calls is offered: this host relays call audio over Bluetooth and its hotspot can only use 2.4 GHz,
+    // Bluetooth's own band, so the two share one radio. A hotspot that can use 5 GHz keeps out of Bluetooth's way.
+    bool call_pause = 7;
   }
 }
 
@@ -282,6 +291,9 @@ message SmsSendResult {
 // long (the phone moved to another Wi-Fi and may be asleep when that moment comes). Any later SetHotspot cancels it.
 // Only sent to hosts whose Hotspot.Capabilities.off_when_unused is set: older hosts would turn the hotspot off at once.
 message SetHotspot { bool on = 1; int32 off_when_unused_s = 2; }
+
+// Hotspot.call_pause on or off. Applies at once (a running hotspot isn't restarted, as SetHotspotConfig would).
+message SetHotspotCallPause { bool on = 1; }
 
 // Per-SIM settings from the client. Only the fields that are present are changed.
 message SetSim {

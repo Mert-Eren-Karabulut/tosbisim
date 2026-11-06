@@ -28,12 +28,17 @@ object DataUsage {
     fun init(ctx: Context, updated: () -> Unit) { app = ctx.applicationContext; onUpdate = updated }
 
     /** Wi-Fi tethering interfaces changed (from Hotspot's tethering callback). */
+    /** The hotspot's next start ends a call pause (HotspotPause): its session numbers carry on instead of restarting. */
+    @Volatile private var continuing = false
+    fun continueSession() { continuing = true }
+
     fun tetheringChanged(wifiIfaces: List<String>) {
         if (!::app.isInitialized) return
         val wasOn = ifaces.isNotEmpty()
         ifaces = wifiIfaces
         if (!wasOn && wifiIfaces.isNotEmpty()) {
-            prefs.edit().putLong("session_down", 0).putLong("session_up", 0).apply()
+            if (continuing) continuing = false                  // back after a call pause: the same session goes on
+            else prefs.edit().putLong("session_down", 0).putLong("session_up", 0).apply()
             wifiIfaces.forEach { forgetLast(it) }        // a new session starts from the counter's current value
             main.removeCallbacks(poll); main.postDelayed(poll, 5_000)
         } else if (wasOn && wifiIfaces.isEmpty()) {

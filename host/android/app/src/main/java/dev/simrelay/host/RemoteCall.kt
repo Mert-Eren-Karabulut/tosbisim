@@ -28,6 +28,8 @@ object RemoteCall {
     private val timers = Executors.newSingleThreadScheduledExecutor()
     private val gen = AtomicInteger()
     @Volatile private var session: Session? = null
+    /** The call's audio goes over the internet right now (a hotspot paused for the call comes back: HotspotPause). */
+    val active: Boolean get() = session != null
 
     private class Session(val turn: Turn, val daemon: LocalSocket) {
         @Volatile var alive = true
@@ -80,6 +82,7 @@ object RemoteCall {
                     check(gen.get() == my) { "superseded during setup" }
                     session = s
                 }
+                HotspotPause.transportChanged("call audio over the internet")
                 // Refresh on a timer, not on packet flow: a stalled capture must not let the allocation expire.
                 s.refresh = timers.scheduleWithFixedDelay({ if (s.alive) runCatching { s.turn.refresh() } }, REFRESH_S, REFRESH_S, TimeUnit.SECONDS)
                 Log.i(TAG, "remote audio: relay ${relay.port} bound to the phone's relay in ${System.currentTimeMillis() - t0} ms")
@@ -119,6 +122,7 @@ object RemoteCall {
         } catch (_: Exception) {
         } finally {
             synchronized(this) { if (session === s) { session = null } }
+            HotspotPause.transportChanged("internet call audio ended")
             if (s.alive) {
                 s.close()
                 Log.i(TAG, "remote audio closed (daemon side ended): sent=${s.tx} recv=${s.rx} bad=${s.bad}")
@@ -133,6 +137,7 @@ object RemoteCall {
     fun close(why: String) {
         gen.incrementAndGet()
         val s = synchronized(this) { session.also { session = null } } ?: return
+        HotspotPause.transportChanged("internet call audio closed")
         s.close()
         Log.i(TAG, "remote audio closed ($why): sent=${s.tx} recv=${s.rx} bad=${s.bad}")
     }
