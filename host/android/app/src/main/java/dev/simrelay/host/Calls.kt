@@ -87,6 +87,7 @@ object CallRegistry {
         val audible = active.firstOrNull(::isOwned) ?: active.firstOrNull() ?: dialing.firstOrNull(::isOwned) ?: dialing.firstOrNull()
         val relayed = audible != null && isOwned(audible) && VoiceGate.allows(ids[audible]?.let { clientUuids[it] })
         HotspotPause.calls(relayed, live = liveCalls())
+        if (byId.values.any { it.stateCompat == Call.STATE_HOLDING }) CallAudioCheck.held()
         if (relayed && audible != null) {
             BasicSilence.set(app, false)
             Daemon.callActive(Daemon.profile()?.sessionForSlot(maxOf(slotOf(audible), 0)) ?: (maxOf(slotOf(audible), 0) + 1),

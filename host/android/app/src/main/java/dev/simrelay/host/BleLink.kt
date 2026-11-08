@@ -67,6 +67,9 @@ class BleLink(
     private val pairable: () -> Boolean = { false },
 ) {
     companion object {
+        /** The link's connection interval as last reported to our client role (ms; 0 = not yet): call_audio_poor. */
+        @Volatile var lastIntervalMs = 0.0
+
         /** Advertised instead of [SERVICE] while the host is ready to pair; the iPhone's Add host sheet looks for it
          *  only. (A manufacturer-data mark under company 0xFFFF was ignored by iOS's sheet, 19 Oct.) */
         val PAIR_SERVICE: UUID = UUID.fromString("0e9c0002-0971-48af-ba0b-2c5c254faec0")
@@ -248,6 +251,7 @@ class BleLink(
             @Suppress("unused")
             fun onConnectionUpdated(g: BluetoothGatt, interval: Int, latency: Int, timeout: Int, status: Int) {
                 Log.i(TAG, "BLE connection updated: interval ${interval * 1.25} ms, latency $latency, timeout ${timeout * 10} ms, status $status")
+                if (status == BluetoothGatt.GATT_SUCCESS) lastIntervalMs = interval * 1.25
             }
         }, BluetoothDevice.TRANSPORT_LE) }.getOrNull()
         if (g != null) clients[d.address] = g else Log.w(TAG, "connection priority: no GATT client right now")

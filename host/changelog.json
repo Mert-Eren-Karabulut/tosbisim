@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.27",
+    "code": 63,
+    "en": "When a call loses part of its sound in either direction, the host now reports it by itself with its numbers and log (if \"Send anonymous diagnostics\" is on), so the cause can be found without asking you for a report. A problem report sent from your phone now waits longer for the host's side, which slower hosts missed.",
+    "tr": "Bir arama iki yönden birinde sesinin bir kısmını kaybederse ana cihaz bunu artık sayıları ve günlüğüyle birlikte kendisi bildiriyor (\"Anonim tanılama verisi gönder\" açıksa); böylece sizden rapor istemeden sebep bulunabiliyor. Telefonunuzdan gönderilen sorun raporu artık ana cihazın kısmını daha uzun bekliyor; yavaş ana cihazlarda bu kısım eksik kalıyordu."
+  },
+  {
     "version": "0.12.26",
     "code": 62,
     "en": "On some phone pairs, calls lost part of the caller's sound: the host sent each 10 ms of sound as its own Bluetooth packet, more than such a link carries, and what didn't fit was dropped. It now sends everything waiting together. Hosts whose hotspot can only use 2.4 GHz, the band Bluetooth carries your calls on, get a new setting: the hotspot turns off while a call's sound is on Bluetooth and comes back when the call ends.",

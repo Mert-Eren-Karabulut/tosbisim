@@ -99,11 +99,11 @@ object Diag {
      * The host log's last [bytes], scrubbed and without its noise ([LogTrim]): the persistent host log with root, else
      * this app's own logcat. Read [LOG_READ] so the excerpt still reaches back far enough once the noise is out.
      */
-    fun recentLog(bytes: Int): String {
-        val raw = Root.sh("tail -c $LOG_READ /data/adb/tosbisim/logs/host.log", 10_000).takeIf { it.ok && it.out.length > 200 }?.out
+    fun recentLog(bytes: Int, fast: Boolean = false): String {
+        val raw = Root.sh("tail -c $LOG_READ /data/adb/tosbisim/logs/host.log", if (fast) 4_000L else 10_000L).takeIf { it.ok && it.out.length > 200 }?.out
             ?.let { if (Regex("""^\d\d-\d\d \d\d:""").containsMatchIn(it.take(9))) it else it.substring(it.indexOf('\n') + 1) }   // tail -c starts mid-line
             ?.let { it.substring(0, it.lastIndexOf('\n') + 1) }   // the file ends mid-line (4 KiB blocks): logcat has it whole
-            ?.let { it + newerThan(it) }
+            ?.let { it + newerThan(it, if (fast) 6_000L else 10_000L) }
             ?: runCatching {
                 val p = ProcessBuilder("logcat", "-d", "-t", "2000", "--pid=${android.os.Process.myPid()}").redirectErrorStream(true).start()
                 p.inputStream.bufferedReader().readText().also { p.waitFor() }
@@ -117,10 +117,10 @@ object Diag {
      * trails by up to 25 minutes, the very ones a problem report is about (audit, 1 Nov 2026). Same buffers and tags as
      * the capture (box.c log_spawn).
      */
-    private fun newerThan(file: String): String {
+    private fun newerThan(file: String, timeoutMs: Long): String {
         val last = Regex("""^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}""", RegexOption.MULTILINE).findAll(file).lastOrNull()?.value ?: return ""
         val r = Root.sh("logcat -d -b main,system,crash -v time -T ${Root.q(last)} -s SimRelayHost:I simrelayd:I voice:D " +
-            "Telecom:I SemWifiApTimeOutImpl:I Tethering:W AndroidRuntime:E", 10_000)
+            "Telecom:I SemWifiApTimeOutImpl:I Tethering:W AndroidRuntime:E", timeoutMs)
         if (!r.ok) return ""
         val newer = r.out.lines().filter { it.length > 18 && it.substring(0, 18) > last }
         return if (newer.isEmpty()) "" else (if (file.endsWith("\n")) "" else "\n") + newer.joinToString("\n") + "\n"

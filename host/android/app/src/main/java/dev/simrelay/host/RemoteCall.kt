@@ -83,6 +83,7 @@ object RemoteCall {
                     session = s
                 }
                 HotspotPause.transportChanged("call audio over the internet")
+                CallAudioCheck.internetUsed()
                 // Refresh on a timer, not on packet flow: a stalled capture must not let the allocation expire.
                 s.refresh = timers.scheduleWithFixedDelay({ if (s.alive) runCatching { s.turn.refresh() } }, REFRESH_S, REFRESH_S, TimeUnit.SECONDS)
                 Log.i(TAG, "remote audio: relay ${relay.port} bound to the phone's relay in ${System.currentTimeMillis() - t0} ms")

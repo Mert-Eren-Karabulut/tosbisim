@@ -191,6 +191,11 @@ static unsigned g_st_txdrop;
 static int g_st_peak;
 // Totals since the call began, for the call test (AUDIO?): did the caller's voice reach us, did we play into the call.
 static volatile unsigned g_tot_cap, g_tot_voiced, g_tot_sent, g_tot_played;
+// Call quality, per call (the app's end-of-call check, call_audio_poor): caller audio the client's socket had no room
+// for, or captured with no client connected; client audio received, concealed (PLC), and pulls that found nothing to
+// play, counted only while a client is connected (a hang-up's tail isn't a loss).
+static volatile unsigned g_tot_txdrop, g_tot_noclient, g_tot_recv, g_tot_plc, g_tot_starved, g_tot_live;
+static volatile int g_client_up;
 static volatile int g_tot_peak;
 #define VOICED_PEAK 1000          // |sample| above this in a read = someone is talking (silence/comfort noise stays far below)
 static unsigned g_st_played, g_st_depth_max;
@@ -217,6 +222,7 @@ static void client_set(int fd) {
     pthread_mutex_lock(&g_client_lock);
     int old = g_client;
     g_client = fd;
+    g_client_up = fd >= 0;
     pthread_mutex_unlock(&g_client_lock);
     if (old >= 0 && old != fd) close(old);
 }
@@ -224,8 +230,9 @@ static void client_set(int fd) {
 static void client_send(const uint8_t *buf, int len) {
     pthread_mutex_lock(&g_client_lock);
     int fd = g_client;
-    if (fd >= 0 && send(fd, buf, len, MSG_DONTWAIT | MSG_NOSIGNAL) < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) g_st_txdrop++;
+    if (fd < 0) g_tot_noclient++;
+    else if (send(fd, buf, len, MSG_DONTWAIT | MSG_NOSIGNAL) < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) { g_st_txdrop++; g_tot_txdrop++; }
         else LOGW("audio send: %s", strerror(errno));
     }
     pthread_mutex_unlock(&g_client_lock);
@@ -277,7 +284,7 @@ static void jb_put(uint16_t seq, const uint8_t *data, int len) {
     g_jb_valid[seq & JB_MASK] = 1;
     if ((int16_t)(seq - g_jb_highest) > 0) g_jb_highest = seq;
     if (!g_jb_playing && jb_depth() + 1 >= JB_PRIME) g_jb_playing = 1;
-    g_st_recv++;
+    g_st_recv++; g_tot_recv++;
     pthread_mutex_unlock(&g_jb_lock);
 }
 
@@ -306,7 +313,7 @@ static int jb_take(uint8_t *out, int *outlen, int *mode) {
         g_st_fec++;
     } else {
         *mode = 2;                                   // depth >= 0 here, so later audio exists
-        g_st_plc++;
+        g_st_plc++; g_tot_plc++;
     }
     g_jb_next = next + 1;
     // Adaptive latency: if even the window's minimum depth exceeded JB_KEEP, that much buffering was never
@@ -376,7 +383,7 @@ static void *io_main(void *arg) {
                 LOGI("audio client gone");
                 pthread_mutex_lock(&g_client_lock);
                 int mine = g_client == fd;
-                if (mine) g_client = -1;
+                if (mine) { g_client = -1; g_client_up = 0; }
                 pthread_mutex_unlock(&g_client_lock);
                 if (mine) close(fd);
                 fd = -1;
@@ -606,6 +613,7 @@ static void *playback_main(void *arg) {
         }
         int len = 0, mode = 2;
         int have = jb_take(pkt, &len, &mode);
+        if (g_client_up && g_jb_started) { g_tot_live++; if (!have) g_tot_starved++; }   // read unlocked: counters only
         int samples;
         if (!have) {
             // Nothing to play yet (priming / idle): emit one frame of silence to keep the clock.
@@ -684,11 +692,14 @@ void audio_tune_get(char *buf, size_t n) {
 }
 
 void audio_totals(char *buf, size_t n) {
-    snprintf(buf, n, "cap=%u voiced=%u sent=%u played=%u peak=%d", g_tot_cap, g_tot_voiced, g_tot_sent, g_tot_played, g_tot_peak);
+    snprintf(buf, n, "cap=%u voiced=%u sent=%u played=%u peak=%d txdrop=%u noclient=%u recv=%u plc=%u starved=%u live=%u",
+             g_tot_cap, g_tot_voiced, g_tot_sent, g_tot_played, g_tot_peak,
+             g_tot_txdrop, g_tot_noclient, g_tot_recv, g_tot_plc, g_tot_starved, g_tot_live);
 }
 
 void audio_call_begin(const audio_cfg_t *cfg) {
     g_tot_cap = g_tot_voiced = g_tot_sent = g_tot_played = 0;
+    g_tot_txdrop = g_tot_noclient = g_tot_recv = g_tot_plc = g_tot_starved = g_tot_live = 0;
     g_tot_peak = 0;
     if (g_call_running) audio_call_end();
     g_cfg = *cfg;
@@ -708,7 +719,7 @@ void audio_call_end(void) {
     if (g_cap_started) pthread_join(g_cap_t, NULL);
     if (g_play_started) pthread_join(g_play_t, NULL);
     g_cap_started = g_play_started = 0;
-    char t[160];
+    char t[320];
     audio_totals(t, sizeof(t));            // what flowed each way, for every call (diagnosis without a client)
     LOGI("audio call end: %s", t);
 }

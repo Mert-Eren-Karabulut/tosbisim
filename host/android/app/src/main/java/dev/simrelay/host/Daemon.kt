@@ -33,10 +33,12 @@ object Daemon {
     @Volatile private var chargeLimit = 0          // re-sent on reconnect (sysfs resets on reboot only, but cheap)
 
     @Volatile private var started = false
+    private lateinit var appCtx: Context
     /** [start] ran (the host service is up): only then does a failed probe mean the daemon is down. */
     fun isStarted() = started
 
     fun start(ctx: Context) {
+        appCtx = ctx.applicationContext
         val p = Profiles.forThisDevice(ctx)
         profile = p
         started = true
@@ -52,6 +54,7 @@ object Daemon {
         if (connected && connectedSince == 0L) connectedSince = android.os.SystemClock.elapsedRealtime()
         if (activeSession == session) return@execute
         activeSession = session
+        CallAudioCheck.begin(when { HotspotPause.paused -> "paused"; ::appCtx.isInitialized && Hotspot.isOn(appCtx) -> "on"; else -> "off" })
         request("CALL_START $session")
     }
 
@@ -61,7 +64,12 @@ object Daemon {
         activeSession = 0
         val since = connectedSince
         connectedSince = 0L
-        if (since != 0L) checkCallAudio(request("AUDIO?"), (android.os.SystemClock.elapsedRealtime() - since) / 1000)
+        if (since != 0L) {
+            val reply = request("AUDIO?")
+            val seconds = (android.os.SystemClock.elapsedRealtime() - since) / 1000
+            checkCallAudio(reply, seconds)
+            reply?.let { runCatching { CallAudioCheck.check(it, seconds) }.onFailure { e -> Log.w(TAG, "call audio check: $e") } }
+        }
         request("CALL_END")
     }
 

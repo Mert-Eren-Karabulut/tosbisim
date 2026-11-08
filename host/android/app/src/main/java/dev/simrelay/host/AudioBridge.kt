@@ -98,6 +98,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
             return
         }
         Log.i(TAG, "audio bridge up (L2CAP <-> simrelayd)")
+        CallAudioCheck.bridgeUp()
         val alive = AtomicBoolean(true)
         val ds = daemon
 
@@ -125,8 +126,8 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                     var dropped = false
                     qLock.lock()
                     try {
-                        q.addLast(framed); st[0]++
-                        while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true }
+                        q.addLast(framed); st[0]++; CallAudioCheck.frameIn()
+                        while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true; CallAudioCheck.dropped() }
                         ready.signal()
                     } finally { qLock.unlock() }
                     // A write that never returns logs nothing itself: say so from here (a client got no caller audio
@@ -155,6 +156,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                     val t0 = SystemClock.elapsedRealtime()
                     out.write(buf, 0, n)
                     val ms = (SystemClock.elapsedRealtime() - t0).toInt()
+                    CallAudioCheck.wrote(frames, ms.toLong())
                     qLock.lock()
                     try {
                         st[1] += frames; st[2]++; if (ms > st[4]) st[4] = ms

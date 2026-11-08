@@ -22,7 +22,8 @@
 //   SET keys: capture, rec_config, inject.1, inject.2, mute.tx, mute.rx, mute.vsid, mute.ramp
 //   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
 //   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
-//   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak=   (call test totals)
+//   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
+//                     starved= live=   (this call's totals: the call test, the app's end-of-call checks)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <percent> | CHARGE? -> OK <node>|ERR
 //                     NETBLOCK <uid> <0|1> (iptables chain tosbisim_block)
 //                     + the Volume Up x3 / Volume Down x3 escape gesture, reported to the app by broadcast
@@ -748,7 +749,7 @@ static void handle_line(int fd, char *line) {
         if (info.type == SNDRV_CTL_ELEM_TYPE_ENUMERATED) enum_items(&info, items, sizeof(items));
         reply(fd, "OK count=%u%s%s", info.count, *items ? " items=" : "", items);
     } else if (strcmp(cmd, "AUDIO?") == 0) {            // call test: did audio flow both ways
-        char t[160];
+        char t[320];
         audio_totals(t, sizeof(t));
         reply(fd, "OK call=%d session=%d silence=%d %s", g_call, g_session, g_np, t);
     } else if (strcmp(cmd, "STALL") == 0) {             // STALL <ms>: debug, one inject-loop stall
