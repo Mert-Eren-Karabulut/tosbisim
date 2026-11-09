@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.28",
+    "code": 64,
+    "en": "When your phone moves to another Wi-Fi during a call, the host now waits for the call to end before it turns its unused hotspot off: turning Wi-Fi off in the middle of a call can interrupt the call's sound over Bluetooth.",
+    "tr": "Telefonunuz bir arama sırasında başka bir Wi-Fi ağına geçerse ana cihaz, kullanılmayan erişim noktasını kapatmak için artık aramanın bitmesini bekliyor: aramanın ortasında Wi-Fi'nin kapanması, aramanın Bluetooth üzerinden giden sesini kesebiliyor."
+  },
+  {
     "version": "0.12.27",
     "code": 63,
     "en": "When a call loses part of its sound in either direction, the host now reports it by itself with its numbers and log (if \"Send anonymous diagnostics\" is on), so the cause can be found without asking you for a report. A problem report sent from your phone now waits longer for the host's side, which slower hosts missed.",

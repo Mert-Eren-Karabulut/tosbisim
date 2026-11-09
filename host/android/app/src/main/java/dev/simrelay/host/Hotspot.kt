@@ -135,6 +135,7 @@ object Hotspot {
     @Volatile private var offUnusedMs = 0L
     @Volatile private var unusedSince = 0L
     @Volatile private var appCtx: Context? = null
+    @Volatile private var waitedForCall = false
     private const val UNUSED_ALARM = "hotspot-unused"
 
     fun offWhenUnused(ctx: Context, seconds: Int) {
@@ -153,7 +154,7 @@ object Hotspot {
 
     fun cancelOffWhenUnused() {
         if (offUnusedMs == 0L) return
-        offUnusedMs = 0
+        offUnusedMs = 0; waitedForCall = false
         appCtx?.let { WakeAlarm.cancel(it, UNUSED_ALARM) }
         Log.i(TAG, "hotspot: off-when-unused cancelled")
     }
@@ -175,6 +176,15 @@ object Hotspot {
         if (clients.isNotEmpty()) unusedSince = 0 else if (unusedSince == 0L) unusedSince = now
         val left = if (unusedSince == 0L) offUnusedMs else offUnusedMs - (now - unusedSince)
         if (unusedSince != 0L && left <= 0) {
+            // Never in a call: the iPhone heard its Bluetooth audio fade 4 s after a Redmi Note 9 Pro host turned its
+            // unused hotspot off mid-call (its Wi-Fi then went off entirely), and moved the call to the internet (8 Nov
+            // 2026). Wi-Fi changes wait for the call's end, as a call pause's do (HotspotPause).
+            if (HotspotPause.callUp) {
+                if (!waitedForCall) { waitedForCall = true; Log.i(TAG, "hotspot unused: off once the call is over") }
+                WakeAlarm.set(ctx, UNUSED_ALARM, 20_000L) { checkUnused() }
+                return
+            }
+            waitedForCall = false
             offUnusedMs = 0
             Log.i(TAG, "hotspot off: unused for ${(now - unusedSince) / 1000} s (the phone is on another Wi-Fi)")
             set(ctx, false) { _, _ -> }

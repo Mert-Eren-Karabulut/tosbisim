@@ -89,6 +89,9 @@ object HotspotPause {
     /** Off right now for a call (Hotspot.paused_for_call). Any thread. */
     @Volatile var paused = false; private set
 
+    /** Any call up, relayed or not (CallRegistry): Hotspot's "off once unused" waits for its end. Any thread. */
+    @Volatile var callUp = false; private set
+
     /** The user's choice (Hotspot.call_pause), whatever this host offers. */
     val setting: Boolean get() = ::app.isInitialized && core.setting
 
@@ -112,6 +115,7 @@ object HotspotPause {
 
     /** CallRegistry, at every call change. */
     fun calls(relayed: Boolean, live: Boolean) = onMain {
+        callUp = live
         val was = core.inCall
         core.calls(relayed, live)
         if (core.inCall != was) Log.i(TAG, "hotspot call pause: ${if (core.inCall) "call audio started" else "calls over"}")
