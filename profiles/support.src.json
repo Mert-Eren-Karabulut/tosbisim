@@ -1,7 +1,7 @@
 {
   "comment": "TosbiSim support table, hand-written part. tools/corpus/gen_support.py merges it with the AndroidDumps corpus into profiles/support.json (do not edit that one). Tiers: verified = measured by us; expected = its own firmware shows our auto profile builds (same family as a verified phone), or every Android 11+ phone with its chip does, or its family's route is built from the kernel's own controls and passed a call test on a phone of that family; experimental = our family, but its files need a hand-made profile, or its chip's phones aren't all known to build; not_yet = an audio family we can't drive yet (Basic mode: SMS, call control, hotspot); unsupported = rules below (can't be rooted). Full voice still needs the in-app call test on every phone.",
-  "version": 4,
-  "updated": "2026-11-02",
+  "version": 5,
+  "updated": "2026-11-10",
   "phones": [
     {
       "name": "Galaxy S20 FE",
@@ -123,14 +123,29 @@
       "family": "qcom-legacy"
     },
     {
-      "name": "Redmi Note 9 Pro / 9S",
+      "name": "Redmi Note 9 Pro",
       "brand": "Xiaomi",
       "models": [
-        "Redmi Note 9 Pro",
-        "Redmi Note 9S"
+        "Redmi Note 9 Pro"
       ],
       "devices": [
-        "joyeuse",
+        "joyeuse"
+      ],
+      "soc": "Snapdragon 720G",
+      "tier": "verified",
+      "profile": null,
+      "note": "Call test passed on two users' phones, 8 and 9 Nov 2026 (MIUI 14 on Android 12, MIUI 12.5 on Android 11): two-way call audio with the profile the host builds from the phone's own audio files. Needs Mi Unlock.",
+      "note_tr": "Arama testi iki kullanıcının telefonunda geçti, 8 ve 9 Kasım 2026 (Android 12 üzerinde MIUI 14, Android 11 üzerinde MIUI 12.5): ana cihazın telefonun kendi ses dosyalarından oluşturduğu profille iki yönlü arama sesi. Mi Unlock gerekir.",
+      "family": "qcom-legacy"
+    },
+    {
+      "name": "Redmi Note 9S / Note 9 Pro (India)",
+      "brand": "Xiaomi",
+      "models": [
+        "Redmi Note 9S",
+        "Redmi Note 9 Pro"
+      ],
+      "devices": [
         "curtana"
       ],
       "soc": "Snapdragon 720G",

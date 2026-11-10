@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.29",
+    "code": 65,
+    "en": "Texts to short codes (banks, operators) now go out at once. Android was asking on the host's own screen whether to send them, where nobody sees it, and the text failed much later. Reports about a call's sound now carry what the host itself did during the call: its own log lines were being crowded out by Android's. The host also notices when the caller's voice reaches it slower than real time, which made calls choppy on some phones without anything being reported, and a problem report sent from your phone now includes the last call's sound numbers.",
+    "tr": "Kısa numaralara (bankalar, operatörler) gönderilen mesajlar artık hemen gidiyor. Android, gönderip göndermemeyi ana cihazın kimsenin görmediği kendi ekranında soruyor, mesaj da çok sonra başarısız oluyordu. Bir aramanın sesiyle ilgili raporlar artık ana cihazın arama sırasında ne yaptığını içeriyor: ana cihazın kendi günlük satırları Android'in satırları arasında kayboluyordu. Ana cihaz ayrıca arayanın sesinin kendisine gerçek zamandan yavaş ulaştığını da fark ediyor; bu durum bazı telefonlarda aramaları kesik kesik yapıyor ama hiçbir şey bildirilmiyordu. Telefonunuzdan gönderilen sorun raporu da artık son aramanın ses sayılarını içeriyor."
+  },
+  {
     "version": "0.12.28",
     "code": 64,
     "en": "When your phone moves to another Wi-Fi during a call, the host now waits for the call to end before it turns its unused hotspot off: turning Wi-Fi off in the middle of a call can interrupt the call's sound over Bluetooth.",

@@ -650,6 +650,7 @@ object Relay {
         val facts = Diag.facts("event").apply {
             remove("install_id"); remove("kind")
             Compat.bleCaps(app)?.let { put("ble", it) }
+            CallAudioCheck.lastForReport()?.let { put("last_call", it) }     // the last call's audio numbers, poor or not
         }.toString()
         val parts = utf8Chunks(log, 2_800).ifEmpty { listOf("") }
         parts.forEachIndexed { i, chunk ->

@@ -133,7 +133,11 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                     // A write that never returns logs nothing itself: say so from here (a client got no caller audio
                     // for 15 s while its own audio still reached the host, 6 Nov 2026)
                     val now = SystemClock.elapsedRealtime()
-                    if (dropped && now - stallLogged > 5000) { stallLogged = now; Log.w(TAG, "audio to the phone: Bluetooth isn't taking it, dropping the oldest") }
+                    if (dropped && now - stallLogged > 5000) {
+                        stallLogged = now
+                        // With what the radios were doing: a stall's cause is one of them, and the line alone never said
+                        Log.w(TAG, "audio to the phone: Bluetooth isn't taking it, dropping the oldest (${runCatching { CallAudioCheck.radio() }.getOrDefault("")})")
+                    }
                 }
             } catch (_: Exception) {} finally { alive.set(false); qLock.lock(); try { ready.signalAll() } finally { qLock.unlock() } }
         }, "audio-down").apply { isDaemon = true; start() }

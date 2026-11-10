@@ -43,7 +43,27 @@ object Daemon {
         profile = p
         started = true
         Log.i(TAG, "profile: ${p?.id ?: "NONE for this device — Basic mode only"}")
+        CallAudioCheck.radio = { radios(appCtx) }
         exec.execute { connect() }
+    }
+
+    /** What the phone's radios are doing, in a few words: Bluetooth shares its antenna and its chip with them. */
+    private fun radios(c: Context): String {
+        val wifi = runCatching { c.getSystemService(android.net.wifi.WifiManager::class.java).isWifiEnabled }.getOrNull()
+        val net = runCatching { c.getSystemService(android.telephony.TelephonyManager::class.java).voiceNetworkType }.getOrNull()
+        val g = when (net) {
+            null -> "?"
+            android.telephony.TelephonyManager.NETWORK_TYPE_GSM, android.telephony.TelephonyManager.NETWORK_TYPE_GPRS,
+            android.telephony.TelephonyManager.NETWORK_TYPE_EDGE -> "2g"
+            android.telephony.TelephonyManager.NETWORK_TYPE_UMTS, android.telephony.TelephonyManager.NETWORK_TYPE_HSDPA,
+            android.telephony.TelephonyManager.NETWORK_TYPE_HSUPA, android.telephony.TelephonyManager.NETWORK_TYPE_HSPA,
+            android.telephony.TelephonyManager.NETWORK_TYPE_HSPAP -> "3g"
+            android.telephony.TelephonyManager.NETWORK_TYPE_LTE -> "lte"
+            android.telephony.TelephonyManager.NETWORK_TYPE_NR -> "nr"
+            android.telephony.TelephonyManager.NETWORK_TYPE_IWLAN -> "wifi-calling"
+            else -> "type$net"
+        }
+        return "wifi=${wifi?.let { if (it) "on" else "off" } ?: "?"} hotspot=${if (Hotspot.isOn(c)) "on" else "off"} voice=$g ble=${BleLink.lastIntervalMs}ms"
     }
 
     /** A call is ACTIVE (or still DIALING: [connected] false) on this voice session (1 or 2). Idempotent. */
@@ -190,8 +210,10 @@ object Daemon {
                 Log.i(TAG, "profile: ${profile?.let { "${it.id} (auto)" } ?: "none, Basic mode"}")
                 if (profile != null) Relay.voiceChanged()          // the phone's Host tab offers the call test now
                 // What the auto profile found (or why not) is the one thing we can't learn from firmware dumps
+                // Once per firmware, app version and outcome: every start sent it again, 42 of the first 320 reports
                 Diag.event("auto_profile", org.json.JSONObject().put("what", if (profile != null) "built" else "none")
-                    .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("why", AutoProfile.why).put("audio", Discovery.audio()))
+                    .put("profile", profile?.json ?: org.json.JSONObject.NULL).put("why", AutoProfile.why).put("audio", Discovery.audio()),
+                    onceFor = "${android.os.Build.FINGERPRINT}|${BuildConfigInfo.version(appCtx)}|${profile?.id}")
             }
             profile?.daemonSetLines()?.forEach { send(it) }
             if (Box.blocksPowerKey) send("POWERKEY 1")      // a restarted daemon has let go of the power key

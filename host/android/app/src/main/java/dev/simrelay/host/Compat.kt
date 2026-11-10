@@ -91,7 +91,10 @@ object Compat {
                     }?.let { local(it, "reason") }
                 }.orEmpty()
             }
-            list.firstOrNull { p -> strings(p, "models").any { it.equals(Build.MODEL, ignoreCase = true) } }?.let { p ->
+            // A row naming this model AND this codename first: Xiaomi's model is a marketing name two phones can share
+            // ("Redmi Note 9 Pro" is joyeuse, and in India curtana, where only joyeuse passed the call test; 10 Nov 2026)
+            val named = list.filter { p -> strings(p, "models").any { it.equals(Build.MODEL, ignoreCase = true) } }
+            (named.firstOrNull { p -> Build.DEVICE in strings(p, "devices") } ?: named.firstOrNull())?.let { p ->
                 return Verdict(tierOf(p), p.optString("name", fallbackName), note(p))
             }
             // Same codename, other model number (another region of the same phone): at most "expected".
@@ -191,9 +194,11 @@ object Compat {
         }.getOrNull()
     }
 
+    /** The chip as Android names it; some custom ROMs say "unknown unknown" (a Galaxy J7 Prime): the board platform then. */
     fun soc(): String =
-        (if (Build.VERSION.SDK_INT >= 31) "${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}".trim() else "")
-            .ifEmpty { prop("ro.board.platform") }
+        (if (Build.VERSION.SDK_INT >= 31) "${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}" else "")
+            .split(' ').filter { it.isNotEmpty() && !it.equals(Build.UNKNOWN, ignoreCase = true) }.joinToString(" ")
+            .ifEmpty { prop("ro.board.platform") }.ifEmpty { Build.HARDWARE }
 
     /** Root works for this app (asks Magisk; the user grants it once). Call only on a user action. */
     fun rootWorks(): Boolean = Root.sh("id -u", 20_000).last == "0"

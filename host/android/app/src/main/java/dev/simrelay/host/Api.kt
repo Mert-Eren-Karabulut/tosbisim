@@ -30,7 +30,7 @@ object Api {
         val p = Daemon.profile()
         val body = JSONObject()
             .put("kind", "precheck").put("app", "host").put("app_version", BuildConfigInfo.version(ctx))
-            .put("install_id", installId(ctx))
+            .put("install_id", installId(ctx)).put("at", System.currentTimeMillis() / 1000)
             .put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL).put("device", Build.DEVICE)
             .put("soc", Compat.soc()).put("sdk", Build.VERSION.SDK_INT).put("firmware", Build.FINGERPRINT)
             .put("tier", v.tier.name.lowercase())

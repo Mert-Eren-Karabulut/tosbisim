@@ -195,6 +195,11 @@ static volatile unsigned g_tot_cap, g_tot_voiced, g_tot_sent, g_tot_played;
 // for, or captured with no client connected; client audio received, concealed (PLC), and pulls that found nothing to
 // play, counted only while a client is connected (a hang-up's tail isn't a loss).
 static volatile unsigned g_tot_txdrop, g_tot_noclient, g_tot_recv, g_tot_plc, g_tot_starved, g_tot_live;
+// The capture against the clock: the time its reads took while the stream worked (ms, read to read with no error
+// between) and its read errors. A voice path that hands over less than real time loses caller audio before anything
+// here can drop it, so no other total shows it (a Galaxy A13's phone got 85 of 100 frames a second and the end-of-call
+// check saw nothing wrong, 10 Nov 2026).
+static volatile unsigned g_tot_capms, g_tot_caperr;
 static volatile int g_client_up;
 static volatile int g_tot_peak;
 #define VOICED_PEAK 1000          // |sample| above this in a read = someone is talking (silence/comfort noise stays far below)
@@ -476,6 +481,8 @@ static void *capture_main(void *arg) {
     unsigned frames = 0;
 
     struct timespec err_log = { 0 };
+    struct timespec prev_read = { 0 };                            // the last good read, {0} after an error
+    unsigned long long cap_ns = 0;
     struct timespec backoff = { .tv_nsec = 10 * 1000 * 1000 };    // 10 ms: don't spin when the backend isn't streaming
     // One 10 ms period per read, paced by the DSP. Errors are rare with the system tinyalsa; the cap below
     // still stops a failing stream from storming the audio DSP (a storm rebooted the phone once).
@@ -498,6 +505,8 @@ static void *capture_main(void *arg) {
                 break;
             }
             g_st_caperr++;
+            g_tot_caperr++;
+            prev_read.tv_sec = 0; prev_read.tv_nsec = 0;         // the stream isn't running: this gap isn't a slow capture
             if (consecutive_err >= CAP_SLOW_AFTER) {     // e.g. outgoing call still dialing: voice path not up yet
                 struct timespec slow = { .tv_nsec = 100 * 1000 * 1000 };
                 nanosleep(&slow, NULL);
@@ -512,6 +521,12 @@ static void *capture_main(void *arg) {
             continue;                                   // NULL pcm is retried at the top of the loop
         }
         consecutive_err = 0;
+        struct timespec read_at; clock_gettime(CLOCK_MONOTONIC, &read_at);
+        if (prev_read.tv_sec || prev_read.tv_nsec) {
+            cap_ns += (unsigned long long)(read_at.tv_sec - prev_read.tv_sec) * 1000000000ull + (unsigned long long)read_at.tv_nsec - (unsigned long long)prev_read.tv_nsec;
+            g_tot_capms = (unsigned)(cap_ns / 1000000ull);
+        }
+        prev_read = read_at;
         if (cch == 2) for (int i = 0; i < cframe; i++) pcmbuf[i] = (int16_t)(((int)pcmbuf[2 * i] + pcmbuf[2 * i + 1]) / 2);
         int rpeak = 0;
         for (int i = 0; i < cframe; i++) { int a = pcmbuf[i] < 0 ? -pcmbuf[i] : pcmbuf[i]; if (a > rpeak) rpeak = a; }
@@ -692,14 +707,15 @@ void audio_tune_get(char *buf, size_t n) {
 }
 
 void audio_totals(char *buf, size_t n) {
-    snprintf(buf, n, "cap=%u voiced=%u sent=%u played=%u peak=%d txdrop=%u noclient=%u recv=%u plc=%u starved=%u live=%u",
+    snprintf(buf, n, "cap=%u voiced=%u sent=%u played=%u peak=%d txdrop=%u noclient=%u recv=%u plc=%u starved=%u live=%u capms=%u caperr=%u",
              g_tot_cap, g_tot_voiced, g_tot_sent, g_tot_played, g_tot_peak,
-             g_tot_txdrop, g_tot_noclient, g_tot_recv, g_tot_plc, g_tot_starved, g_tot_live);
+             g_tot_txdrop, g_tot_noclient, g_tot_recv, g_tot_plc, g_tot_starved, g_tot_live, g_tot_capms, g_tot_caperr);
 }
 
 void audio_call_begin(const audio_cfg_t *cfg) {
     g_tot_cap = g_tot_voiced = g_tot_sent = g_tot_played = 0;
     g_tot_txdrop = g_tot_noclient = g_tot_recv = g_tot_plc = g_tot_starved = g_tot_live = 0;
+    g_tot_capms = g_tot_caperr = 0;
     g_tot_peak = 0;
     if (g_call_running) audio_call_end();
     g_cfg = *cfg;

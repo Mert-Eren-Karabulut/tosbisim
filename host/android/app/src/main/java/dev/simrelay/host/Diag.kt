@@ -48,14 +48,16 @@ object Diag {
 
     /**
      * Report [name] (e.g. "module_install_failed", "auto_profile", "milestone") with [detail]. [withLog]: attach the
-     * last lines of the host log (scrubbed). Never throws, never blocks the caller.
+     * last lines of the host log (scrubbed). [onceFor]: what this report is about (a firmware, a version); the same
+     * again isn't sent. Never throws, never blocks the caller.
      */
     fun event(name: String, detail: JSONObject = JSONObject(), withLog: Boolean = true, passed: Boolean? = null,
-              kind: String = "event", force: Boolean = false) = exec.execute {
+              kind: String = "event", force: Boolean = false, onceFor: String? = null) = exec.execute {
         if (!enabled) return@execute
         val key = "$name:${detail.optString("what")}"
         val p = prefs()
         val now = System.currentTimeMillis()
+        if (onceFor != null && p.getString("once_$key", null) == onceFor) return@execute
         if (!force && kind == "event" && now - p.getLong("last_$key", 0) < REPEAT_MS) return@execute   // force: the user asked
         val day = now / 86_400_000L
         val sentToday = if (p.getLong("day", -1) == day) p.getInt("today", 0) else 0
@@ -63,7 +65,8 @@ object Diag {
         // 20 Oct 2026). They come once per firmware, so they don't count.
         val dump = kind == "dump"
         if (!dump && sentToday >= PER_DAY) return@execute
-        p.edit().putLong("last_$key", now).putLong("day", day).putInt("today", sentToday + if (dump) 0 else 1).apply()
+        p.edit().putLong("last_$key", now).putLong("day", day).putInt("today", sentToday + if (dump) 0 else 1)
+            .also { e -> if (onceFor != null) e.putString("once_$key", onceFor) }.apply()
         val body = facts(kind).put("payload", JSONObject()
             .put("event", name).put("detail", detail)
             .put("android", Build.VERSION.RELEASE).put("root", Compat.rootKind(app).id)
@@ -83,11 +86,16 @@ object Diag {
         event("milestone", detail.put("what", name), withLog = false)
     }
 
-    /** The phone's identity for a report: model and firmware facts, never ids of the phone or the user. */
+    /**
+     * The phone's identity for a report: model and firmware facts, never ids of the phone or the user. "at": when the
+     * report was made (epoch seconds). A host without internet sends its queue days later, and the server only knew
+     * when each report arrived: a week of a Galaxy J7 Prime's reports all read the same minute (9 Nov 2026).
+     */
     fun facts(kind: String): JSONObject {
         val p = Daemon.profile()
         return JSONObject()
             .put("kind", kind).put("app", "host").put("app_version", BuildConfigInfo.version(app))
+            .put("at", System.currentTimeMillis() / 1000)
             .put("install_id", Api.installId(app))
             .put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL).put("device", Build.DEVICE)
             .put("soc", Compat.soc()).put("sdk", Build.VERSION.SDK_INT).put("firmware", Build.FINGERPRINT)
@@ -110,7 +118,8 @@ object Diag {
             }.getOrDefault("")
         return LogTrim.trim(Scrub.text(raw), bytes)
     }
-    private const val LOG_READ = 64 * 1024
+    // Far enough back for a whole call: its end alone is 15 KB of Telecom's lines, which LogTrim then leaves out
+    private const val LOG_READ = 256 * 1024
 
     /**
      * The lines logcat holds after the file's last one: it writes the file in whole 4 KiB blocks, so a quiet host's file
@@ -217,46 +226,72 @@ object Scrub {
 }
 
 /**
- * A report's log excerpt without what crowded out our own lines: on custom ROMs Telecom's phone-account bookkeeping
- * (an account "modified" several times a second while a SIM flickers) filled most of the 12 KB, and the setup
- * screen's daemon check repeats every 2 s (J7 Prime report, 5 Nov 2026). Nothing is dropped silently: a left-out
- * stretch becomes one "…" line with its count and times. Our own lines, other tags, Telecom's call, audio-route and
- * Bluetooth lines, and lines that aren't logcat lines (stack traces) always stay; only identical repeats in a row
- * are folded into their first line.
+ * A report's log excerpt without what crowded out our own lines. Nothing is dropped silently: a left-out stretch
+ * becomes one "…" line with its count and times.
+ *
+ * - Telecom keeps its call events ("Event: RecordEntry TC@1: SET_ACTIVE", audio-route events) and its warnings. Its
+ *   other lines went first on custom ROMs (phone-account bookkeeping several times a second while a SIM flickers, a
+ *   J7 Prime report, 5 Nov 2026), then everywhere: a call's end is 15 KB of them in half a second, so the excerpt of
+ *   a 5-minute call with a 3 s stall, and of a problem report about choppy audio, held the call's last half second
+ *   and none of ours (a Redmi Note 9 Pro and a Galaxy A13, 9-10 Nov 2026).
+ * - The daemon's "audio 5s" line stays when something was off in those 5 s; a run of clean ones is its first line
+ *   and a count, so a whole call fits.
+ * - Identical lines in a row are folded into their first (the setup screen's daemon check repeats every 2 s).
+ * - Other tags' lines are cut at [LONG] characters.
+ * Our own lines, other tags, and lines that aren't logcat lines (stack traces) always stay.
  */
 object LogTrim {
     private val TIME = Regex("""^\d\d-\d\d (\d\d:\d\d:\d\d)\.\d{3}""")
-    /** "-v time" ("I/Tag( 123): msg") or threadtime (" 123  456 I Tag: msg"): the tag and the message. */
-    private val LINE = Regex("""^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}\s+(?:[VDIWEF]/([^(]*?)\s*\(\s*\d+\)|\d+\s+\d+\s+[VDIWEF]\s+(\S[^:]*?)\s*):\s?(.*)$""")
-    /** Telecom keeping its phone-account registry, never about a call's course. */
+    /** "-v time" ("I/Tag( 123): msg") or threadtime (" 123  456 I Tag: msg"): the level, the tag and the message. */
+    private val LINE = Regex("""^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}\s+(?:([VDIWEF])/([^(]*?)\s*\(\s*\d+\)|\d+\s+\d+\s+([VDIWEF])\s+(\S[^:]*?)\s*):\s?(.*)$""")
+    /** Telecom keeping its phone-account registry, never about a call's course (its warnings included). */
     private val NOISE = Regex("""^(PhoneAccountRegistrar: |CallsManager: (handlePhoneAccountChanged|Sending phone-account|updateEmergencyCallNotificationAsync)|(TelecomServiceImpl\$1)?: (registerPhoneAccount|unregisterPhoneAccount|isInEmergencyCall)|AppLabelProxy: )""")
+    /** Telecom's own record of a call's course: one short line per event. */
+    private val CALL_EVENT = Regex("""^(Event: RecordEntry |Logging\.Events: )""")
+    /** The daemon's 5 s line with nothing off: no drop, loss, late or concealed frame, error or reopen, at real time. */
+    private val AUDIO_5S = Regex("""^audio 5s: sent=(\d+) txdrop=0 recv=(\d+) fec=0 plc=0 late=0 catchup=0 caperr=0 .*\((\d+)\.\d fps\).* reopen=0\b""")
+    private val OURS = setOf("SimRelayHost", "simrelayd")
+    private const val LONG = 300
+
+    private fun steady(msg: String): Boolean {
+        val m = AUDIO_5S.find(msg) ?: return false
+        val (sent, recv, fps) = m.destructured
+        return sent.toInt() in 490..510 && recv.toInt() in 490..510 && fps.toInt() in 99..100
+    }
 
     /** [log] without the noise, its newest [keep] characters, starting at a whole line. */
     fun trim(log: String, keep: Int): String {
         val out = StringBuilder()
         var dropped = 0; var dropFirst = ""; var dropLast = ""
-        var lastKey: String? = null; var repeats = 0; var repeatLast = ""
-        fun endRepeats() { if (repeats > 0) out.append("… the line above ").append(repeats).append(" more times, last at ").append(repeatLast).append('\n'); repeats = 0 }
+        var lastKey: String? = null; var repeats = 0; var repeatLast = ""; var alike = false
+        fun endRepeats() {
+            if (repeats > 0) out.append(if (alike) "… $repeats more clean 'audio 5s' lines, last at $repeatLast\n" else "… the line above $repeats more times, last at $repeatLast\n")
+            repeats = 0
+        }
         fun endDropped() {
-            if (dropped > 0) out.append("… ").append(dropped).append(" Telecom phone-account lines left out (")
+            if (dropped > 0) out.append("… ").append(dropped).append(" Telecom lines left out (")
                 .append(dropFirst).append(if (dropLast != dropFirst) "–$dropLast" else "").append(")\n")
             dropped = 0
         }
-        for (line in log.split('\n')) {
-            if (line.isEmpty()) continue
+        for (raw in log.split('\n')) {
+            if (raw.isEmpty()) continue
+            var line = raw
             val m = LINE.find(line)
             val time = TIME.find(line)?.groupValues?.get(1).orEmpty()
             if (m != null) {
-                val tag = m.groupValues[1].ifEmpty { m.groupValues[2] }.trim()
-                val msg = m.groupValues[3]
-                if (tag == "Telecom" && NOISE.containsMatchIn(msg)) {
+                val level = m.groupValues[1].ifEmpty { m.groupValues[3] }
+                val tag = m.groupValues[2].ifEmpty { m.groupValues[4] }.trim()
+                val msg = m.groupValues[5]
+                if (tag == "Telecom" && (NOISE.containsMatchIn(msg) || (level !in "WEF" && !CALL_EVENT.containsMatchIn(msg)))) {
                     if (dropped == 0) dropFirst = time
                     dropped++; dropLast = time; continue
                 }
-                val key = "$tag: $msg"
+                val clean = tag == "simrelayd" && steady(msg)
+                val key = if (clean) "simrelayd: audio 5s, clean" else "$tag: $msg"
                 if (key == lastKey) { repeats++; repeatLast = time; continue }
                 endRepeats(); endDropped()
-                lastKey = key
+                lastKey = key; alike = clean
+                if (tag !in OURS && line.length > LONG) line = line.substring(0, LONG) + "…"
             } else { endRepeats(); endDropped(); lastKey = null }
             out.append(line).append('\n')
         }

@@ -10,6 +10,10 @@ import java.util.concurrent.atomic.AtomicLong
  * frames to the phone in every call (7 Nov 2026), and the one report sent by hand came without the host's side: the
  * numbers that tell where they went (the daemon's txdrop, the bridge's backlog drops and slow writes) stayed on the
  * host. The daemon counts its side (AUDIO?), the bridge its own here; [judge] decides.
+ *
+ * Every relayed call leaves its numbers in the log and in [last], judged poor or not: a problem report sent by hand
+ * carries them (Relay.sendDiagnostics), so the host's side of "the call was choppy" no longer depends on which lines
+ * the log excerpt happened to hold (the same A13, 10 Nov 2026: its excerpt was the call's last half second).
  */
 object CallAudioCheck {
     /** One call's bridge numbers (AudioBridge, any thread). */
@@ -21,6 +25,16 @@ object CallAudioCheck {
     @Volatile private var internet = false
     @Volatile private var held = false
     @Volatile private var hotspotAtStart = "off"
+
+    /** The last relayed call's numbers ("what": "ok" or [judge]'s verdict) and when it ended (elapsedRealtime). */
+    @Volatile var last: JSONObject? = null; private set
+    @Volatile private var lastAt = 0L
+
+    /** What the radios were doing, for a stall's log line and a call's numbers (Daemon.start sets it; any thread). */
+    @Volatile var radio: () -> String = { "" }
+
+    /** [last] for a problem report, with how long ago the call ended; null before the first call. */
+    fun lastForReport(): JSONObject? = last?.let { JSONObject(it.toString()).put("ended_s_ago", (android.os.SystemClock.elapsedRealtime() - lastAt) / 1000) }
 
     /** A write at least this slow is a stall: the link stopped taking audio (a Meizu client got none for 15 s, 6 Nov). */
     const val STALL_MS = 1000L
@@ -48,12 +62,19 @@ object CallAudioCheck {
     /**
      * What went wrong, or null: "both", "to_phone" (caller audio lost on its way to the phone), "from_phone" (the
      * phone's audio missing in the call) or "stall". Pure (CallAudioCheckTest). [d]: the daemon's AUDIO? totals.
+     *
+     * "to_phone" is also a capture that handed over less than real time (under 97% of the time its reads took, or
+     * read errors for 3% of the frames): that audio is gone before the daemon or the bridge could drop it. Not judged
+     * with a hold in the call (the voice path stops then).
      */
     fun judge(seconds: Long, d: Map<String, Long>, b: Bridge, held: Boolean): String? {
         if (seconds < 10) return null
         val toClient = (d["sent"] ?: 0) - (d["noclient"] ?: 0)
         val lostDown = (d["txdrop"] ?: 0) + b.dropped
-        val down = toClient >= 500 && lostDown * 100 >= toClient * 3
+        val cap = d["cap"] ?: 0
+        val capMs = d["capms"] ?: 0
+        val short = !held && capMs >= 5000 && (cap * 1000 <= capMs * 97 || (d["caperr"] ?: 0) * 100 >= cap * 3)
+        val down = (toClient >= 500 && lostDown * 100 >= toClient * 3) || short
         val live = d["live"] ?: 0
         val up = !held && live >= 500 && ((d["plc"] ?: 0) + (d["starved"] ?: 0)) * 100 >= live * 5
         return when {
@@ -75,21 +96,30 @@ object CallAudioCheck {
         val d = totals(reply)
         if (d["live"] == null) return                                      // a daemon from before these totals
         val b = bridge()
-        val what = judge(seconds, d, b, held) ?: return
+        val what = judge(seconds, d, b, held)
         val toClient = ((d["sent"] ?: 0) - (d["noclient"] ?: 0)).coerceAtLeast(1)
         val live = (d["live"] ?: 0).coerceAtLeast(1)
-        val detail = JSONObject().put("what", what).put("seconds", seconds)
+        val capMs = d["capms"] ?: 0
+        val detail = JSONObject().put("what", what ?: "ok").put("seconds", seconds)
             .put("via", if (b.sessions > 0) (if (internet) "bluetooth+internet" else "bluetooth") else if (internet) "internet" else "none")
             .put("to_phone_lost_pct", ((d["txdrop"] ?: 0) + b.dropped) * 100 / toClient)
             .put("from_phone_missing_pct", if (held) -1 else ((d["plc"] ?: 0) + (d["starved"] ?: 0)) * 100 / live)
+            // The caller's audio the voice path handed over, against the time it took (100 = real time; -1: an older daemon)
+            .put("capture_pct", if (capMs >= 1000) (d["cap"] ?: 0) * 1000 / capMs else -1).put("capture_errors", d["caperr"] ?: -1)
             .put("slowest_write_ms", b.slowestMs).put("stalls", b.stalls)
             .put("frames_per_write", if (b.writes > 0) "%.2f".format(java.util.Locale.ROOT, b.framesOut.toDouble() / b.writes) else "-")
             .put("bridges", b.sessions).put("held", held)
             .put("ble_interval_ms", BleLink.lastIntervalMs)
-            .put("hotspot", hotspotAtStart)
-            .put("daemon", reply.removePrefix("OK ").take(300))
+            .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))
+            .put("daemon", reply.removePrefix("OK ").take(340))
             .put("bridge", "in=${b.framesIn} out=${b.framesOut} writes=${b.writes} dropped=${b.dropped}")
-        android.util.Log.w("SimRelayHost", "call audio poor ($what): $detail")
-        Diag.event("call_audio_poor", detail)
+        last = detail; lastAt = android.os.SystemClock.elapsedRealtime()
+        // As words, not JSON: the report's scrubber blanks quoted strings, and this line then read {"<…>":"<…>", …}
+        // (the daemon's totals are the line before this one: "daemon <- AUDIO? -> OK …")
+        val line = "call audio ${if (what == null) "ok" else "poor ($what)"}: " + detail.keys().asSequence().filter { it != "what" && it != "daemon" }
+            .joinToString(" ") { k -> detail.opt(k).toString().let { v -> if (' ' in v) "$k=[$v]" else "$k=$v" } }
+        if (what == null) { android.util.Log.i("SimRelayHost", line); return }
+        android.util.Log.w("SimRelayHost", line)
+        Diag.event("call_audio_poor", JSONObject(detail.toString()))
     }
 }

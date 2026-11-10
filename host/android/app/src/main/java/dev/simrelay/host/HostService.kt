@@ -76,6 +76,7 @@ class HostService : Service() {
         Onboarding.hostRunning(this)
         Daemon.start(this)
         Relay.start(this)
+        RootSms.set(this, "allow", "host start")
         android.os.Handler(mainLooper).postDelayed({ Onboarding.selfHeal(this) }, 30_000)   // after service.sh's own pass
         welcomeOnce()
     }
@@ -146,6 +147,14 @@ class HostService : Service() {
             // Debug (root only: this service is not exported): relay a synthetic SMS through the normal path.
             "INJECT_SMS" -> injectSms(intent.getStringExtra("from") ?: "+905550000000",
                                       intent.getStringExtra("body") ?: "Test")
+            // adb debug (root only): send a text as the phone would (no client needed), e.g. to a short code:
+            // --es to 12345 [--es body Test] [--ei slot 0]. The result is the log's "SMS <id> sent=..." line.
+            "SEND_SMS" -> intent.getStringExtra("to")?.let { to ->
+                SmsSender.send(this, dev.simrelay.protocol.v1.SmsSend.newBuilder().setClientMsgId("adb-" + System.currentTimeMillis())
+                    .setTo(to).setBody(intent.getStringExtra("body") ?: "Test").setSlot(intent.getIntExtra("slot", -1)).build())
+            }
+            // adb debug (root only): Android's short-code question back on (--es answer ask) or answered (allow)
+            "SHORT_CODES" -> RootSms.set(this, intent.getStringExtra("answer") ?: "allow", "adb")
         }
         return START_STICKY
     }
