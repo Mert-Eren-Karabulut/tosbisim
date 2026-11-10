@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.33",
+    "code": 69,
+    "en": "The numbers about the Bluetooth chip that 0.12.32 added to each call were missing on Samsung hosts: the host looked for Android's record in the wrong place there. It now finds it.",
+    "tr": "0.12.32'nin her aramaya eklediği Bluetooth çipi ölçümleri Samsung ana cihazlarda eksikti: ana cihaz Android'in kaydını orada yanlış yerde arıyordu. Artık buluyor."
+  },
+  {
     "version": "0.12.32",
     "code": 68,
     "en": "Hosts with a MediaTek chip (a Galaxy A13, for example) use the faster Bluetooth radio mode again: the slower one tried in 0.12.31 did not make their calls less choppy. To find out why they are, a call's numbers now also say how the host's Bluetooth chip sent the caller's voice: how many packets a second it was given and how many it sent, and how long they waited. Only these numbers are kept, never a call's sound or a text.",

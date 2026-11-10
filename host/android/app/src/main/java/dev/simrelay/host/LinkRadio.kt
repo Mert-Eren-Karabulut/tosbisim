@@ -108,7 +108,8 @@ object LinkRadio {
 
     // ---- one look at the Bluetooth stack: who scans, and what the chip did
 
-    private const val RING = "/data/misc/bluetooth/logs/btsnooz_hci.log"
+    // Where Android writes the record, and where Samsung's does (a Galaxy A13 on Android 14, 11 Nov 2026)
+    private const val RINGS = "/data/misc/bluetooth/logs/btsnooz_hci.log /data/log/bt/btsnooz_hci.log"
     private const val MARK = "@ring"
 
     /** [scans]; how the chip sent the busiest link's last seconds, as numbers and in words; what that link agreed. */
@@ -125,7 +126,7 @@ object LinkRadio {
      */
     fun look(): Look = runCatching {
         val r = Root.sh("dumpsys bluetooth_manager | sed -n '/GATT Scanner Map/,/GATT Advertiser Map/p;/Le scan:/p' | head -c 16000; " +
-            "echo; echo $MARK; f=$RING; if [ -f \$f ]; then echo age \$(( \$(date +%s) - \$(stat -c %Y \$f) )); base64 \$f | head -c 8000000; " +
+            "echo; echo $MARK; f=\$(ls -t $RINGS 2>/dev/null | head -1); if [ -n \"\$f\" ]; then echo age \$(( \$(date +%s) - \$(stat -c %Y \$f) )); base64 \$f | head -c 8000000; " +
             "else echo none; ls /data/misc/bluetooth/logs /data/log/bt 2>&1 | head -12; fi", 3_000)
         val dump = r.out.substringBefore("\n$MARK\n")
         val rest = r.out.substringAfter("\n$MARK\n", "")
