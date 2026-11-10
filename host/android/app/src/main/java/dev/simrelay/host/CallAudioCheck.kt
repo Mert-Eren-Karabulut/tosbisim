@@ -90,8 +90,11 @@ object CallAudioCheck {
     fun totals(reply: String): Map<String, Long> =
         Regex("""\b(\w+)=(-?\d+)""").findAll(reply).associate { it.groupValues[1] to (it.groupValues[2].toLongOrNull() ?: 0) }
 
-    /** Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected. */
-    fun check(reply: String, seconds: Long) {
+    /**
+     * Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected, [scans] who scanned for
+     * Bluetooth devices on this phone ([LinkRadio.scans]; "" when not asked).
+     */
+    fun check(reply: String, seconds: Long, scans: String = "") {
         if (!VoiceGate.fullVoice) return
         val d = totals(reply)
         if (d["live"] == null) return                                      // a daemon from before these totals
@@ -108,15 +111,16 @@ object CallAudioCheck {
             .put("capture_pct", if (capMs >= 1000) (d["cap"] ?: 0) * 1000 / capMs else -1).put("capture_errors", d["caperr"] ?: -1)
             .put("slowest_write_ms", b.slowestMs).put("stalls", b.stalls)
             .put("frames_per_write", if (b.writes > 0) "%.2f".format(java.util.Locale.ROOT, b.framesOut.toDouble() / b.writes) else "-")
-            .put("pack", AudioPack.now())                                   // frames a packet this host starts with
             .put("bridges", b.sessions).put("held", held)
             .put("ble_interval_ms", BleLink.lastIntervalMs)
+            // The link's radio mode (sending/receiving), what was asked and heard about it, and the scans sharing the radio
+            .put("phy", LinkRadio.inUse).put("phy_log", LinkRadio.history()).put("bt_scans", scans)
             .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))
             .put("daemon", reply.removePrefix("OK ").take(340))
             .put("bridge", "in=${b.framesIn} out=${b.framesOut} writes=${b.writes} dropped=${b.dropped}")
         last = detail; lastAt = android.os.SystemClock.elapsedRealtime()
         // As words, not JSON: the report's scrubber blanks quoted strings, and this line then read {"<…>":"<…>", …}
-        // (the daemon's totals are the line before this one: "daemon <- AUDIO? -> OK …")
+        // (the daemon's totals are a few lines before this one: "daemon <- AUDIO? -> OK …")
         val line = "call audio ${if (what == null) "ok" else "poor ($what)"}: " + detail.keys().asSequence().filter { it != "what" && it != "daemon" }
             .joinToString(" ") { k -> detail.opt(k).toString().let { v -> if (' ' in v) "$k=[$v]" else "$k=$v" } }
         if (what == null) { android.util.Log.i("SimRelayHost", line); return }

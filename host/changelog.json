@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.31",
+    "code": 67,
+    "en": "A test for hosts with a MediaTek chip (a Galaxy A13, for example), whose calls still reach the phone choppy. Sending the caller's voice in larger Bluetooth packets (0.12.30) did not help and is taken back. These hosts now ask the Bluetooth link for its slower, sturdier radio mode, and every call's numbers say which mode the call really used and whether anything on the host was scanning for Bluetooth devices meanwhile. Other hosts work as before.",
+    "tr": "MediaTek çipli ana cihazlar (örneğin Galaxy A13) için bir deneme: bu cihazlarda aramalar telefona hâlâ kesik ulaşıyor. Arayanın sesini daha büyük Bluetooth paketleriyle göndermek (0.12.30) işe yaramadı ve geri alındı. Bu ana cihazlar artık Bluetooth bağlantısından daha yavaş ama daha sağlam radyo modunu istiyor; her aramanın ölçümleri de aramanın gerçekte hangi modda yapıldığını ve o sırada ana cihazda Bluetooth cihazı tarayan bir şey olup olmadığını söylüyor. Diğer ana cihazlar eskisi gibi çalışıyor."
+  },
+  {
     "version": "0.12.30",
     "code": 66,
     "en": "Calls through a host with a MediaTek chip (a Galaxy A13, for example) should sound less choppy. On these phones the caller's voice left the host app on time, but the phone's Bluetooth passed it on late and in bursts, and nothing on the host showed it. The host now sends the caller's voice in fewer, larger Bluetooth packets on these phones, which their Bluetooth keeps up with. Other hosts work as before.",

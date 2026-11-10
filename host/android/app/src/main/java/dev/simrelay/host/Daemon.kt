@@ -88,9 +88,12 @@ object Daemon {
             val reply = request("AUDIO?")
             val seconds = (android.os.SystemClock.elapsedRealtime() - since) / 1000
             checkCallAudio(reply, seconds)
-            reply?.let { runCatching { CallAudioCheck.check(it, seconds) }.onFailure { e -> Log.w(TAG, "call audio check: $e") } }
-        }
-        request("CALL_END")
+            request("CALL_END")
+            // After the call's routes are given back: the scan list is a root command (two seconds at most), and this
+            // executor is what the next call's start waits on
+            val scans = if (VoiceGate.fullVoice && CallAudioCheck.bridge().sessions > 0) LinkRadio.scansNow() else ""
+            reply?.let { runCatching { CallAudioCheck.check(it, seconds, scans) }.onFailure { e -> Log.w(TAG, "call audio check: $e") } }
+        } else request("CALL_END")
     }
 
     @Volatile private var connectedSince = 0L

@@ -219,7 +219,24 @@ class BleLink(
     fun setCallPriority(high: Boolean) {
         if (wantHigh == high) return
         wantHigh = high
-        for (d in subscribers()) applyPriority(d)
+        for (d in subscribers()) {
+            applyPriority(d)
+            // A call starts: what the link runs on now (read first), then this host's mode again. The link outlives an
+            // app update, so it may still be on what an older version asked for.
+            if (high) { runCatching { gatt?.readPhy(d) }; askPhy(d, "call") }
+        }
+    }
+
+    /**
+     * Ask the link for this host's radio mode ([LinkRadio.mask]). A change comes to onPhyUpdate; not every stack passes
+     * that on, and no change means no word at all, so the mode is read once the exchange has had its time.
+     */
+    private fun askPhy(d: BluetoothDevice, why: String) {
+        val m = LinkRadio.mask
+        LinkRadio.asked(m, why)
+        runCatching { gatt?.setPreferredPhy(d, m, m, BluetoothDevice.PHY_OPTION_NO_PREFERRED) }
+            .onFailure { Log.w(TAG, "BLE radio mode: asking failed: $it") }
+        main.postDelayed({ runCatching { gatt?.readPhy(d) } }, 2_000)
     }
 
     private fun applyPriority(d: BluetoothDevice) {
@@ -325,8 +342,8 @@ class BleLink(
                 Log.i(TAG, "BLE connected ${device.address} bond=${device.bondState}")
                 ignoredDown.remove(device.address)
                 resetStream(device.address)
-                gatt?.setPreferredPhy(device, BluetoothDevice.PHY_LE_2M_MASK, BluetoothDevice.PHY_LE_2M_MASK,
-                    BluetoothDevice.PHY_OPTION_NO_PREFERRED)
+                LinkRadio.linkUp()
+                askPhy(device, "connected")
                 return
             }
             // A false DISCONNECTED comes from a short duplicate connection while the real link stays up (M1 spike)
@@ -342,6 +359,10 @@ class BleLink(
         fun onConnectionUpdated(device: BluetoothDevice, interval: Int, latency: Int, timeout: Int, status: Int) {
             Log.i(TAG, "BLE link ${device.address}: interval ${interval * 1.25} ms, latency $latency, timeout ${timeout * 10} ms (status $status)")
         }
+
+        // The link's radio mode, after a change and when read (askPhy, a call's start): a call's numbers say it
+        override fun onPhyUpdate(device: BluetoothDevice, txPhy: Int, rxPhy: Int, status: Int) = LinkRadio.seen(txPhy, rxPhy, status, "changed")
+        override fun onPhyRead(device: BluetoothDevice, txPhy: Int, rxPhy: Int, status: Int) = LinkRadio.seen(txPhy, rxPhy, status, "read")
 
         override fun onMtuChanged(device: BluetoothDevice, m: Int) {
             mtu[device.address] = m
