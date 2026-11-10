@@ -36,7 +36,7 @@ class CallAudioCheckTest {
         assertNull(CallAudioCheck.judge(30, d(starved = 1500), b(), held = true))
 
     @Test fun aCaptureSlowerThanRealTimeIsCallerAudioLostTooAndNothingElseShowsIt() {
-        // a Galaxy A13 host, 10 Nov 2026: its phone got 85 of 100 frames a second, nothing dropped anywhere
+        // a voice path that hands over 85 frames a second: nothing is dropped anywhere, the audio was never there
         assertEquals("to_phone", CallAudioCheck.judge(30, d(sent = 2550, cap = 2550, capms = 30_000), b(), held = false))
         assertNull(CallAudioCheck.judge(30, d(sent = 2950, cap = 2950, capms = 30_000), b(), held = false))      // 98%: clocks differ
         assertEquals("to_phone", CallAudioCheck.judge(30, d(caperr = 120), b(), held = false))                   // 4% of the reads failed

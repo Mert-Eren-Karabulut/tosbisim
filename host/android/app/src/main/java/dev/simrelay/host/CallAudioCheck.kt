@@ -108,6 +108,7 @@ object CallAudioCheck {
             .put("capture_pct", if (capMs >= 1000) (d["cap"] ?: 0) * 1000 / capMs else -1).put("capture_errors", d["caperr"] ?: -1)
             .put("slowest_write_ms", b.slowestMs).put("stalls", b.stalls)
             .put("frames_per_write", if (b.writes > 0) "%.2f".format(java.util.Locale.ROOT, b.framesOut.toDouble() / b.writes) else "-")
+            .put("pack", AudioPack.now())                                   // frames a packet this host starts with
             .put("bridges", b.sessions).put("held", held)
             .put("ble_interval_ms", BleLink.lastIntervalMs)
             .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))

@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.30",
+    "code": 66,
+    "en": "Calls through a host with a MediaTek chip (a Galaxy A13, for example) should sound less choppy. On these phones the caller's voice left the host app on time, but the phone's Bluetooth passed it on late and in bursts, and nothing on the host showed it. The host now sends the caller's voice in fewer, larger Bluetooth packets on these phones, which their Bluetooth keeps up with. Other hosts work as before.",
+    "tr": "MediaTek çipli bir ana cihaz (örneğin Galaxy A13) üzerinden yapılan aramalarda ses daha az kesik olmalı. Bu telefonlarda arayanın sesi ana cihaz uygulamasından zamanında çıkıyor, ama telefonun Bluetooth'u onu geç ve toplu halde iletiyordu; ana cihazda da bunu gösteren bir şey yoktu. Ana cihaz artık bu telefonlarda arayanın sesini daha az sayıda, daha büyük Bluetooth paketleriyle gönderiyor; Bluetooth'ları buna yetişiyor. Diğer ana cihazlar eskisi gibi çalışıyor."
+  },
+  {
     "version": "0.12.29",
     "code": 65,
     "en": "Texts to short codes (banks, operators) now go out at once. Android was asking on the host's own screen whether to send them, where nobody sees it, and the text failed much later. Reports about a call's sound now carry what the host itself did during the call: its own log lines were being crowded out by Android's. The host also notices when the caller's voice reaches it slower than real time, which made calls choppy on some phones without anything being reported, and a problem report sent from your phone now includes the last call's sound numbers.",

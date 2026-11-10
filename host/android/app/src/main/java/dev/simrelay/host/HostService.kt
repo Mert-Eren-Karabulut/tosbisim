@@ -155,6 +155,9 @@ class HostService : Service() {
             }
             // adb debug (root only): Android's short-code question back on (--es answer ask) or answered (allow)
             "SHORT_CODES" -> RootSms.set(this, intent.getStringExtra("answer") ?: "allow", "adb")
+            // adb debug (root only): caller audio as --ei frames N (1 to 4) a Bluetooth packet from the next call on,
+            // whatever the chip; 0 = by the chip again. Until the app restarts.
+            "AUDIO_PACK" -> { AudioPack.forced = intent.getIntExtra("frames", 0); Log.i(TAG, "AUDIO_PACK: forced=${AudioPack.forced} now=${AudioPack.now()}") }
         }
         return START_STICKY
     }
