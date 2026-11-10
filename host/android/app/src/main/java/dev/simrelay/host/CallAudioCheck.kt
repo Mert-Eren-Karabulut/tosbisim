@@ -91,10 +91,15 @@ object CallAudioCheck {
         Regex("""\b(\w+)=(-?\d+)""").findAll(reply).associate { it.groupValues[1] to (it.groupValues[2].toLongOrNull() ?: 0) }
 
     /**
-     * Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected, [scans] who scanned for
-     * Bluetooth devices on this phone ([LinkRadio.scans]; "" when not asked).
+     * Daemon executor, at the call's end: [reply] is AUDIO?, [seconds] since the call connected, [look] what the
+     * Bluetooth stack said right after it ([LinkRadio.look]; null when not asked: no audio went over Bluetooth).
+     *
+     * A call the host's own counters call fine can still have reached the phone late: the chip took every packet at
+     * once and sent them when it could (a Galaxy A13, 10 Nov 2026). The chip's record shows that, so such a call
+     * reports itself too (call_radio "late"), and each version's first call sends its numbers once ("baseline"): what a
+     * healthy host's look like is what the odd one is read against.
      */
-    fun check(reply: String, seconds: Long, scans: String = "") {
+    fun check(reply: String, seconds: Long, look: LinkRadio.Look? = null) {
         if (!VoiceGate.fullVoice) return
         val d = totals(reply)
         if (d["live"] == null) return                                      // a daemon from before these totals
@@ -114,7 +119,9 @@ object CallAudioCheck {
             .put("bridges", b.sessions).put("held", held)
             .put("ble_interval_ms", BleLink.lastIntervalMs)
             // The link's radio mode (sending/receiving), what was asked and heard about it, and the scans sharing the radio
-            .put("phy", LinkRadio.inUse).put("phy_log", LinkRadio.history()).put("bt_scans", scans)
+            .put("phy", LinkRadio.inUse).put("phy_log", LinkRadio.history()).put("bt_scans", look?.scans.orEmpty())
+            // What the chip did with the call's last seconds and what the link agreed on ([HciRing])
+            .put("hci", look?.hci.orEmpty()).put("hci_link", look?.link.orEmpty())
             .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))
             .put("daemon", reply.removePrefix("OK ").take(340))
             .put("bridge", "in=${b.framesIn} out=${b.framesOut} writes=${b.writes} dropped=${b.dropped}")
@@ -123,7 +130,15 @@ object CallAudioCheck {
         // (the daemon's totals are a few lines before this one: "daemon <- AUDIO? -> OK …")
         val line = "call audio ${if (what == null) "ok" else "poor ($what)"}: " + detail.keys().asSequence().filter { it != "what" && it != "daemon" }
             .joinToString(" ") { k -> detail.opt(k).toString().let { v -> if (' ' in v) "$k=[$v]" else "$k=$v" } }
-        if (what == null) { android.util.Log.i("SimRelayHost", line); return }
+        if (what == null) {
+            android.util.Log.i("SimRelayHost", line)
+            val s = look?.sending ?: return
+            if (seconds < 10) return
+            val d = JSONObject(detail.toString()).put("what", if (s.late) "late" else "baseline")
+            if (s.late) Diag.event("call_radio", d, withLog = false)
+            else Diag.event("call_radio", d, withLog = false, onceFor = Diag.version())
+            return
+        }
         android.util.Log.w("SimRelayHost", line)
         Diag.event("call_audio_poor", JSONObject(detail.toString()))
     }

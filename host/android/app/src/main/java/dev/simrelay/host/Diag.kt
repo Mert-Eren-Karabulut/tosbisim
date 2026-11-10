@@ -76,6 +76,9 @@ object Diag {
         flush()
     }
 
+    /** This app's version, for "once per version" reports. */
+    fun version(): String = BuildConfigInfo.version(app)
+
     /**
      * An onboarding step reached for the first time on this install ("setup_opened", "root_ok", "module_installed",
      * "host_running", "paired", "full_voice"): the funnel shows where people get stuck, per phone model.

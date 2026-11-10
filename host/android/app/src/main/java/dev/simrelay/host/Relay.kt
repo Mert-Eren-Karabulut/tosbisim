@@ -282,7 +282,11 @@ object Relay {
 
     private fun onPeerFrame(d: Peer, bytes: ByteArray) {
         val env = runCatching { Envelope.parseFrom(bytes) }.getOrElse { Log.w(TAG, "bad frame: $it"); return }
-        if (env.bodyCase == Envelope.BodyCase.HELLO) return hello(d, env)
+        if (env.bodyCase == Envelope.BodyCase.HELLO) {
+            // A link that outlived an app restart never "comes up" for this process: what it agreed on is looked up here
+            main.postDelayed({ LinkRadio.linkLook(onlyIfUnknown = true) }, 6_000)
+            return hello(d, env)
+        }
         if (d.id !in trusted) {
             // A paired host whose app restarted while the link stayed up: ask for a fresh Hello instead of
             // rejecting (the client would otherwise sit on "not paired" until restarted, seen 16 Oct).

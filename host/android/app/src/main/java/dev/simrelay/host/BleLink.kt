@@ -221,14 +221,13 @@ class BleLink(
         wantHigh = high
         for (d in subscribers()) {
             applyPriority(d)
-            // A call starts: what the link runs on now (read first), then this host's mode again. The link outlives an
-            // app update, so it may still be on what an older version asked for.
-            if (high) { runCatching { gatt?.readPhy(d) }; askPhy(d, "call") }
+            // A call starts: its numbers say what the link runs on
+            if (high) runCatching { gatt?.readPhy(d) }
         }
     }
 
     /**
-     * Ask the link for this host's radio mode ([LinkRadio.mask]). A change comes to onPhyUpdate; not every stack passes
+     * Ask the link for the host's radio mode ([LinkRadio.mask]). A change comes to onPhyUpdate; not every stack passes
      * that on, and no change means no word at all, so the mode is read once the exchange has had its time.
      */
     private fun askPhy(d: BluetoothDevice, why: String) {
@@ -344,6 +343,8 @@ class BleLink(
                 resetStream(device.address)
                 LinkRadio.linkUp()
                 askPhy(device, "connected")
+                // What the link agreed on, once the two sides have settled it (packet length, interval): LinkRadio
+                main.postDelayed({ LinkRadio.linkLook() }, 6_000)
                 return
             }
             // A false DISCONNECTED comes from a short duplicate connection while the real link stays up (M1 spike)

@@ -5,17 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class LinkRadioTest {
-    @Test fun mediatekHostsAskFor1M() {
-        // Galaxy A13 (10 Nov 2026): Build.SOC_MANUFACTURER + SOC_MODEL, ro.board.platform, Build.HARDWARE
-        assertEquals(LinkRadio.MASK_1M, LinkRadio.wantedMask(listOf("Mediatek MT6769V/CT", "mt6768", "mt6768")))
-        assertEquals(LinkRadio.MASK_1M, LinkRadio.wantedMask(listOf("", "", "mt6765")))
-    }
-
-    @Test fun otherHostsKeep2M() {
-        assertEquals(LinkRadio.MASK_2M, LinkRadio.wantedMask(listOf("QTI SM8250", "kona", "qcom")))
-        assertEquals(LinkRadio.MASK_2M, LinkRadio.wantedMask(listOf("Samsung Exynos7870", "universal7870", "samsungexynos7870")))
-        assertEquals(LinkRadio.MASK_2M, LinkRadio.wantedMask(listOf("Unisoc T606", "ums9230", "ums9230_4h10")))
-        assertEquals(LinkRadio.MASK_2M, LinkRadio.wantedMask(emptyList()))
+    @Test fun everyHostAsksFor2M() {
+        // 1M was tried on MediaTek hosts (0.12.31): a Galaxy A13 really ran on it and its calls stayed choppy (10 Nov 2026)
+        assertEquals(LinkRadio.MASK_2M, LinkRadio.mask)
     }
 
     @Test fun modeNames() {
