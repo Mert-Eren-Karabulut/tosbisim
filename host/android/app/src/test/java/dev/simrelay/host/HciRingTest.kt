@@ -243,6 +243,51 @@ class HciRingTest {
         assertEquals(Triple(0, 0, 0), s.waitMs)
     }
 
+    /** Android 12's entries as a Galaxy A13 writes them: straight after the header, the real length two more than kept. */
+    private class Old {
+        val out = ByteArrayOutputStream().apply { write(File().bytes()) }
+        private fun le(v: Int, n: Int) { for (i in 0 until n) out.write(v shr (8 * i) and 0xff) }
+        fun packet(deltaMs: Int, kind: Int, vararg d: Int): Old { le(d.size + 1, 2); le(d.size + 2, 2); le(deltaMs, 4); out.write(kind); d.forEach { out.write(it) }; return this }
+        fun bytes(): ByteArray = out.toByteArray()
+    }
+
+    @Test fun aGalaxyA13sRecord() {
+        // Its first two entries as the host reported them on 11 Nov 2026: a reset, and the chip's answer 3353 ms later
+        val seen = "040005000000000020030c0007000800190d0000100e0401030c00"
+        val o = Old()
+        assertEquals(seen, o.packet(0, 0x20, 0x03, 0x0c, 0).packet(3353, 0x10, 0x0e, 4, 1, 0x03, 0x0c, 0).bytes().drop(16).joinToString("") { "%02x".format(it) })
+        o.packet(5, 0x10, 0x0e, 7, 1, 0x02, 0x20, 0, 251, 0, 8)                                          // the chip's room: 251 B x 8
+        o.packet(900, 0x10, 0x3e, 19, 0x01, 0, H, 0, 1, 0, 1, 2, 3, 4, 5, 6, 24, 0, 0, 0, 0xf4, 1, 0)   // connected, peripheral, 30 ms
+        o.packet(40, 0x10, 0x3e, 11, 0x07, H, 0, 27, 0, 0x48, 1, 251, 0, 0x48, 8)                       // packets: out 27 B, in 251 B
+        o.packet(60, 0x10, 0x3e, 10, 0x03, 0, H, 0, 12, 0, 0, 0, 0xf4, 1)                                // 15 ms
+        for (i in 0 until 1200) {
+            o.packet(10, 0x21, H, 0x00, 52, 0, 48, 0, 0x40, 0)                                            // audio out, a packet every 10 ms
+            if (i % 3 == 2) o.packet(0, 0x10, 0x13, 5, 1, H, 0, 2, 0)                                     // the chip sent two in the time of three
+        }
+        val (recs, how) = HciRing.read(o.bytes())
+        assertEquals("old layout 2", how)
+        assertEquals("251 B x 8", HciRing.buffers(recs))
+        assertEquals("peripheral, every 15 ms, packets out 27 B / 328 us, in 251 B / 2120 us", HciRing.links(recs).getValue(H).text())
+        val s = HciRing.sending(recs)!!
+        assertEquals(100.0, s.handed / s.seconds, 1.0); assertEquals(67.0, s.sent / s.seconds, 1.5)
+        assertTrue(s.late)
+        assertEquals("1606 records over 16.4 s: 1 commands, 405 events (400 of them sent reports, 0 the chip maker's own), 1200 data out, 0 data in", HciRing.size(recs))
+    }
+
+    @Test fun aRecordThatStopsBeingReadableSaysWhere() {
+        val o = Old()
+        for (i in 0 until 20) o.packet(10, 0x10, 0x13, 5, 1, H, 0, 1, 0)
+        val good = o.bytes()
+        val (recs, how) = HciRing.read(good + byteArrayOf(9, 0, 3, 0, 1, 1, 1, 1, 0x77, 5, 5, 5))
+        assertEquals(20, recs.size)
+        assertEquals("old layout 2, stops at ${good.size} of ${good.size + 12} B (lengths 9 and 3, kind 119)", how)
+        // Under eight entries is not a record: anything can look like a few
+        assertTrue(HciRing.read(Old().packet(0, 0x20, 0x03, 0x0c, 0).packet(1, 0x10, 0x0e, 4, 1, 0x03, 0x0c, 0).bytes()).first.isEmpty())
+        // ... and the file's description then says how far they went
+        val few = Old().packet(0, 0x20, 0x03, 0x0c, 0).packet(1, 0x10, 0x0e, 4, 1, 0x03, 0x0c, 0).bytes() + byteArrayOf(9, 0, 3, 0, 1, 1, 1, 1, 0x77, 5, 5, 5)
+        assertTrue(HciRing.probe(few), ", 2 entries of old layout 2, stops at 43 of 55 B (lengths 9 and 3, kind 119), " in HciRing.probe(few))
+    }
+
     @Test fun anUnreadableFileSaysWhatItLooksLike() {
         val junk = File().bytes() + ByteArray(600) { (it * 7).toByte() }
         assertTrue(HciRing.read(junk).first.isEmpty())
@@ -257,6 +302,6 @@ class HciRingTest {
 
     @Test fun nothingSent() {
         assertNull(HciRing.sending(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))
-        assertEquals("1 records over 0.0 s", HciRing.size(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))
+        assertEquals("1 records over 0.0 s: 0 commands, 1 events (0 of them sent reports, 0 the chip maker's own), 0 data out, 0 data in", HciRing.size(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))
     }
 }

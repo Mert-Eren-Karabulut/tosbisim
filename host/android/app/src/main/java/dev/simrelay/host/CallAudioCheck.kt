@@ -18,10 +18,11 @@ import java.util.concurrent.atomic.AtomicLong
 object CallAudioCheck {
     /** One call's bridge numbers (AudioBridge, any thread). */
     data class Bridge(val sessions: Long, val framesIn: Long, val framesOut: Long, val writes: Long, val dropped: Long,
-                      val slowestMs: Long, val stalls: Long)
+                      val slowestMs: Long, val stalls: Long, val bytesOut: Long = 0, val blockedMs: Long = 0)
 
     private val sessions = AtomicLong(); private val framesIn = AtomicLong(); private val framesOut = AtomicLong()
     private val writes = AtomicLong(); private val dropped = AtomicLong(); private val slowest = AtomicLong(); private val stalls = AtomicLong()
+    private val bytesOut = AtomicLong(); private val blockedMs = AtomicLong()
     @Volatile private var internet = false
     @Volatile private var held = false
     @Volatile private var hotspotAtStart = "off"
@@ -38,18 +39,22 @@ object CallAudioCheck {
 
     /** A write at least this slow is a stall: the link stopped taking audio (a Meizu client got none for 15 s, 6 Nov). */
     const val STALL_MS = 1000L
+    /** A write this slow waited for the link (a frame comes every 10 ms): its time counts as blocked. */
+    const val BLOCKED_MS = 40L
 
     /** A call's audio starts (CALL_START: the daemon's totals restart too). */
     fun begin(hotspot: String) {
-        listOf(sessions, framesIn, framesOut, writes, dropped, slowest, stalls).forEach { it.set(0) }
+        listOf(sessions, framesIn, framesOut, writes, dropped, slowest, stalls, bytesOut, blockedMs).forEach { it.set(0) }
         internet = false; held = false; hotspotAtStart = hotspot
     }
 
     fun bridgeUp() { sessions.incrementAndGet() }
     fun frameIn() { framesIn.incrementAndGet() }
     fun dropped() { dropped.incrementAndGet() }
-    fun wrote(frames: Int, ms: Long) {
-        framesOut.addAndGet(frames.toLong()); writes.incrementAndGet()
+    /** One write: its frames, its bytes (each frame with its 2-byte length), how long the socket took it. */
+    fun wrote(frames: Int, bytes: Int, ms: Long) {
+        framesOut.addAndGet(frames.toLong()); writes.incrementAndGet(); bytesOut.addAndGet(bytes.toLong())
+        if (ms >= BLOCKED_MS) blockedMs.addAndGet(ms)
         slowest.accumulateAndGet(ms, ::maxOf)
         if (ms >= STALL_MS) stalls.incrementAndGet()
     }
@@ -57,7 +62,8 @@ object CallAudioCheck {
     /** A call was put on hold: the client sends nothing then, so its side isn't judged. */
     fun held() { held = true }
 
-    fun bridge() = Bridge(sessions.get(), framesIn.get(), framesOut.get(), writes.get(), dropped.get(), slowest.get(), stalls.get())
+    fun bridge() = Bridge(sessions.get(), framesIn.get(), framesOut.get(), writes.get(), dropped.get(), slowest.get(), stalls.get(),
+        bytesOut.get(), blockedMs.get())
 
     /**
      * What went wrong, or null: "both", "to_phone" (caller audio lost on its way to the phone), "from_phone" (the
@@ -125,6 +131,9 @@ object CallAudioCheck {
             .put("hotspot", hotspotAtStart).put("radio", runCatching { radio() }.getOrDefault(""))
             .put("daemon", reply.removePrefix("OK ").take(340))
             .put("bridge", "in=${b.framesIn} out=${b.framesOut} writes=${b.writes} dropped=${b.dropped}")
+            // How big a frame went out on average and how long writes waited for the link in all: a limit in bytes shows
+            // in the first (quiet stretches would pass), one in packets doesn't (a Galaxy A13, 11 Nov 2026)
+            .put("bytes_per_frame", if (b.framesOut > 0) b.bytesOut / b.framesOut else -1).put("blocked_ms", b.blockedMs)
         last = detail; lastAt = android.os.SystemClock.elapsedRealtime()
         // As words, not JSON: the report's scrubber blanks quoted strings, and this line then read {"<…>":"<…>", …}
         // (the daemon's totals are a few lines before this one: "daemon <- AUDIO? -> OK …")

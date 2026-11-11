@@ -110,7 +110,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         val q = ArrayDeque<ByteArray>()
         val qLock = ReentrantLock()
         val ready = qLock.newCondition()
-        val st = IntArray(5)                         // frames in, frames out, writes, dropped, slowest write (ms)
+        val st = IntArray(7)                         // frames in, frames out, writes, dropped, slowest write (ms), bytes out, ms blocked
         val down = Thread({
             val din = ds.inputStream
             val buf = ByteArray(MAX)
@@ -160,16 +160,18 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                     val t0 = SystemClock.elapsedRealtime()
                     out.write(buf, 0, n)
                     val ms = (SystemClock.elapsedRealtime() - t0).toInt()
-                    CallAudioCheck.wrote(frames, ms.toLong())
+                    CallAudioCheck.wrote(frames, n, ms.toLong())
                     qLock.lock()
                     try {
                         st[1] += frames; st[2]++; if (ms > st[4]) st[4] = ms
+                        st[5] += n; if (ms >= CallAudioCheck.BLOCKED_MS) st[6] += ms
                         if (t0 > nextLog) {
                             nextLog = t0 + 5000
                             // Only when the link lagged (frames shared a write, a drop, a slow write): healthy calls
                             // already log every 5 s in the daemon's line
                             if (st[3] > 0 || st[2] < st[1] || st[4] >= 40)
-                                Log.i(TAG, "audio to the phone 5s: frames=${st[1]}/${st[0]} writes=${st[2]} dropped=${st[3]} slowest write=${st[4]} ms (max $maxTx B)")
+                                Log.i(TAG, "audio to the phone 5s: frames=${st[1]}/${st[0]} writes=${st[2]} dropped=${st[3]} slowest write=${st[4]} ms " +
+                                    "bytes=${st[5]} blocked=${st[6]} ms (max $maxTx B)")
                             st.fill(0)
                         }
                     } finally { qLock.unlock() }

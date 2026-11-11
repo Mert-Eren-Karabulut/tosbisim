@@ -151,8 +151,9 @@ object LinkRadio {
         links = HciRing.links(recs, links)
         HciRing.buffers(recs).let { if (it.isNotEmpty()) buffers = it }
         val s = HciRing.sending(recs)
+        // With how many links share the chip: its room is divided between them
         val link = (s?.let { links[it.handle] } ?: links.values.singleOrNull())?.text().orEmpty() +
-            if (buffers.isEmpty()) "" else ", chip room $buffers"
+            (if (buffers.isEmpty()) "" else ", chip room $buffers") + (if (links.size > 1) ", ${links.size} links up" else "")
         Look(scans, s, (s?.text() ?: "no data sent") + " | ${HciRing.size(recs)}${if (how.isEmpty()) "" else ", $how"}$stale", link.removePrefix(", "))
     }.getOrElse { Look("", null, "failed: ${it.javaClass.simpleName}", "") }
 
@@ -170,6 +171,12 @@ object LinkRadio {
         Thread {
             val l = look()
             Log.i(TAG, "BLE link: ${l.link.ifEmpty { l.hci }}")
+            // A look that got no answer says nothing: the next Hello looks again
+            if (l.hci.startsWith("no answer") || l.hci.startsWith("failed")) { linkLooked = false; return@Thread }
+            // Once per version, by itself: what the link agreed and what this phone's record keeps need no call to be
+            // known, and the host whose sending needs explaining has been asked for enough calls (11 Nov 2026)
+            Diag.event("link_radio", org.json.JSONObject().put("what", "agreed").put("hci_link", l.link).put("hci", l.hci)
+                .put("bt_scans", l.scans).put("phy", inUse), withLog = false, onceFor = Diag.version())
         }.apply { isDaemon = true }.start()
     }
 }

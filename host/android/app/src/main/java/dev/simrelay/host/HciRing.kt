@@ -32,21 +32,21 @@ object HciRing {
 
     /**
      * The file's records and how they were found ("" = as Android writes them). A Galaxy A13 has the file with the right
-     * name and header in Samsung's own folder, and what follows the header is not Android's layout (11 Nov 2026, seen
-     * only as "not readable"). So the reader tries what a vendor could plausibly have done: the same records starting
-     * later or with their numbers the other way round, or the whole record compressed (as Android's memory record was
-     * before it became a file), in either of the two layouts. When nothing fits, [probe] says what the bytes look like.
+     * name and header in Samsung's own folder, and what follows the header is not Android's layout (11 Nov 2026). What
+     * its first bytes showed that evening: the entries of Android 12's memory record ([old]), not compressed, straight
+     * after the header. The reader also tries what else a vendor could plausibly have done: Android's records starting
+     * later or with their numbers the other way round, or the whole record compressed, in either layout. When nothing
+     * fits, [probe] says what the bytes look like.
      */
     fun read(file: ByteArray): Pair<List<Rec>, String> {
         if (file.size < 16 || String(file, 0, 7, Charsets.US_ASCII) != "btsnoop" || be32(file, 12) != 1002L) return emptyList<Rec>() to ""
         chain(file, 16, false).let { if (it.isNotEmpty()) return it to "" }
+        old(file, 16)?.let { return it }
         resync(file, 16)?.let { return it }
         for ((at, plain) in inflated(file)) {
             chain(plain, 0, false).let { if (it.size >= 8) return it to "compressed from $at" }
             resync(plain, 0)?.let { return it.first to "compressed from $at, ${it.second}" }
-            // Android 12's memory record: a byte of version and the last packet's time before the compressed part
-            val lastMs = if (at >= 16 + 9) le64(file, at - 8) else 0L
-            for (v in intArrayOf(2, 1)) old(plain, v, lastMs).let { if (it.size >= 8) return it to "compressed from $at, old layout $v" }
+            old(plain, 0)?.let { return it.first to "compressed from $at, ${it.second}" }
         }
         return emptyList<Rec>() to ""
     }
@@ -108,29 +108,34 @@ object HciRing {
     private const val MAX_PLAIN = 8 * 1024 * 1024
 
     /**
-     * Android 12's memory record once unpacked: per packet its kept length + 1, (from version 2) its real length, the
-     * milliseconds since the packet before, and a kind (0x10 event, 0x11 data in, 0x20 command, 0x21 data out), all
-     * little-endian, then the bytes kept. Nothing unless the whole of [b] reads that way. [lastMs]: the last packet's time.
+     * Android 12's memory record: per packet its kept length + 1, (from version 2) its real length, the milliseconds
+     * since the packet before, and a kind (0x10 event, 0x11 data in, 0x20 command, 0x21 data out), all little-endian,
+     * then the bytes kept. Read from [from] as far as the entries hold, in the version that gets further; nothing under
+     * [least] entries (anything can look like a few). Says where it stopped when that isn't the end, with the two lengths and the kind found there (three
+     * numbers, no content). The entries carry no date: times count from one second.
      */
-    private fun old(b: ByteArray, version: Int, lastMs: Long): List<Rec> {
-        val head = if (version == 2) 9 else 7
-        class E(val len: Int, val orig: Int, val delta: Long, val type: Int, val at: Int)
-        val es = ArrayList<E>()
-        var o = 0
-        while (o + head <= b.size) {
-            val len = le16(b, o)
-            val orig = if (version == 2) le16(b, o + 2) else len - 1
-            val delta = le32(b, o + head - 5); val type = b[o + head - 1].toInt() and 0xff
-            if (len < 1 || type !in OLD_KINDS || o + head + len - 1 > b.size) return emptyList()
-            es += E(len, orig, delta, type, o + head)
-            o += head + len - 1
+    private fun old(b: ByteArray, from: Int, least: Int = 8): Pair<List<Rec>, String>? {
+        var best: Triple<List<Rec>, Int, Int>? = null                       // records, where they end, version
+        for (version in intArrayOf(2, 1)) {
+            val head = if (version == 2) 9 else 7
+            val out = ArrayList<Rec>()
+            var o = from; var t = 1_000_000L
+            while (o + head <= b.size) {
+                val len = le16(b, o)
+                val orig = if (version == 2) le16(b, o + 2) else len - 1
+                val type = b[o + head - 1].toInt() and 0xff
+                val kind = OLD_KINDS[type]
+                if (len < 1 || kind == null || o + head + len - 1 > b.size) break
+                t += le32(b, o + head - 5) * 1000
+                out += Rec(t, type < 0x20, kind, orig, b.copyOfRange(o + head, o + head + len - 1))
+                o += head + len - 1
+            }
+            if (out.isNotEmpty() && o > (best?.second ?: 0)) best = Triple(out, o, version)
         }
-        if (o != b.size) return emptyList()
-        var t = (lastMs - es.sumOf { it.delta }) * 1000
-        return es.map { e ->
-            t += e.delta * 1000
-            Rec(t, e.type < 0x20, OLD_KINDS.getValue(e.type), e.orig, b.copyOfRange(e.at, e.at + e.len - 1))
-        }
+        val (recs, end, version) = best ?: return null
+        if (recs.size < least) return null
+        val stop = if (end + 9 > b.size) "" else ", stops at $end of ${b.size} B (lengths ${le16(b, end)} and ${le16(b, end + 2)}, kind ${b[end + 8].toInt() and 0xff})"
+        return recs to "old layout $version$stop"
     }
     private val OLD_KINDS = mapOf(0x10 to 4, 0x11 to 2, 0x12 to 3, 0x17 to 5, 0x20 to 1, 0x21 to 2, 0x22 to 3, 0x2d to 5)
 
@@ -150,7 +155,9 @@ object HciRing {
             return "times at ${be.take(8).joinToString(" ").ifEmpty { "-" }} / reversed ${le.take(8).joinToString(" ").ifEmpty { "-" }}"
         }
         val packed = inflated(file).firstOrNull()
-        return "${file.size} B, after the header ${hex(file, 16, 32)}, ${marks(file)}" +
+        // How far Android 12's entries hold from the header on, when they do at all (a Galaxy A13's file starts with them)
+        val entries = old(file, 16, least = 1)?.let { ", ${it.first.size} entries of ${it.second}" }.orEmpty()
+        return "${file.size} B, after the header ${hex(file, 16, 32)}$entries, ${marks(file)}" +
             (packed?.let { (at, plain) -> ", compressed from $at: ${plain.size} B starting ${hex(plain, 0, 24)}, ${marks(plain)}" } ?: ", nothing compressed")
     }
 
@@ -322,7 +329,17 @@ object HciRing {
             queueMax, (pause / 1000).toInt(), (handPause / 1000).toInt(), span(handedBin), span(sentBin), received, credits)
     }
 
-    /** What the record holds, for when it says nothing about a link: "174 records over 10.2 s". */
-    fun size(recs: List<Rec>): String =
-        if (recs.isEmpty()) "0 records" else "${recs.size} records over ${"%.1f".format(java.util.Locale.ROOT, (recs.last().t - recs.first().t) / 1e6)} s"
+    /**
+     * What the record holds, by kind: "174 records over 10.2 s: 3 commands, 171 events (160 of them sent reports, 2 the
+     * chip maker's own), 0 data out, 0 data in". A vendor's record may keep less than Android's, and what it leaves out
+     * decides what it can tell.
+     */
+    fun size(recs: List<Rec>): String {
+        if (recs.isEmpty()) return "0 records"
+        val events = recs.count { it.kind == 4 }
+        return "${recs.size} records over ${"%.1f".format(java.util.Locale.ROOT, (recs.last().t - recs.first().t) / 1e6)} s: " +
+            "${recs.count { it.kind == 1 }} commands, $events events (${recs.count { it.kind == 4 && it.u8(0) == 0x13 }} of them sent reports, " +
+            "${recs.count { it.kind == 4 && it.u8(0) == 0xff }} the chip maker's own), " +
+            "${recs.count { it.kind == 2 && !it.fromChip }} data out, ${recs.count { it.kind == 2 && it.fromChip }} data in"
+    }
 }

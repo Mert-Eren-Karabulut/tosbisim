@@ -643,7 +643,10 @@ object Relay {
         // After an app restart the iPhone's subscription belongs to the old process: our request may never reach it
         // (18 Oct, after a self-update: 3 min of silence). No Hello in 5 s -> drop the link; it reconnects at once.
         if (!droppedOnce.add(d.address)) return                      // once per link after a restart, not every minute
-        main.postDelayed({
+        // By alarm, not by the main thread's timer: that one stops while the host sleeps, and a host that restarts in
+        // a drawer goes back to sleep at once. A Redmi Note 9 Pro dropped the link 24 s after asking instead of 5, and
+        // reset Bluetooth two minutes after that instead of 3 s; its iPhone showed "connecting" all that time (11 Nov 2026).
+        WakeAlarm.set(app, "hello-drop", 5000) {
             // Never during first pairing: a new iPhone may be in iOS's pairing dialog.
             if (d.address !in trusted && !pairingOpen() && d.bondState != BluetoothDevice.BOND_BONDING &&
                 ble.connectedDevices().any { it.address == d.address }) {
@@ -652,16 +655,16 @@ object Relay {
                 // The iPhone owns the link (it's the central): cancelConnection rarely drops it, and a locked iPhone's
                 // app then hears nothing for minutes (19 Oct, after a self-update: 170 s+, reproduced). Switching our
                 // Bluetooth off and on is a real disconnect, which iOS always delivers: Hello within 3 s. Never in a call.
-                main.postDelayed({
+                WakeAlarm.set(app, "hello-reset", 3000) {
                     if (d.address !in trusted && ble.connectedDevices().any { it.address == d.address } &&
                         CallRegistry.snapshot().none { it.state != CallEvent.State.ENDED }) {
                         Log.i(TAG, "link ${d.address} still up without a Hello: resetting Bluetooth so the phone reconnects")
                         // Detached: if this app dies in those 2 s, Bluetooth must still come back on
                         Root.background("setsid sh -c 'svc bluetooth disable; sleep 2; svc bluetooth enable' </dev/null >/dev/null 2>&1 &")
                     }
-                }, 3000)
+                }
             }
-        }, 5000)
+        }
     }
 
     /** The host's half of a problem report from the iPhone: scrubbed log + facts, in parts (frames are <= 4 KB). */
