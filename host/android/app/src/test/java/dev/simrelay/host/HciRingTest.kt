@@ -177,6 +177,84 @@ class HciRingTest {
         assertTrue(s.text(), s.text().startsWith("last 8.0 s: handed: no data packets in the record, chip sent 50/s in 50 reports/s (per half second 25-25)"))
     }
 
+    // ---- a vendor's own layout (a Galaxy A13's file had the right header and was not readable, 11 Nov 2026)
+
+    private fun call() = stream(15.0, 4, seconds = 3).bytes()
+    private fun deflate(b: ByteArray): ByteArray {
+        val out = ByteArrayOutputStream()
+        java.util.zip.DeflaterOutputStream(out).use { it.write(b) }
+        return out.toByteArray()
+    }
+
+    @Test fun recordsThatStartLater() {
+        val f = call()
+        val odd = f.copyOf(16) + ByteArray(40) { 0x5a } + f.copyOfRange(16, f.size)
+        val (recs, how) = HciRing.read(odd)
+        assertEquals(HciRing.records(f).size, recs.size)
+        assertEquals("records from 56", how)
+        assertEquals(300, HciRing.sending(recs)!!.handed)
+    }
+
+    @Test fun recordsWithTheirNumbersTheOtherWayRound() {
+        val f = call()
+        val le = f.copyOf()
+        var o = 16
+        while (o + 24 <= f.size) {
+            val incl = ((f[o + 4].toInt() and 0xff) shl 24) or ((f[o + 5].toInt() and 0xff) shl 16) or ((f[o + 6].toInt() and 0xff) shl 8) or (f[o + 7].toInt() and 0xff)
+            for (field in intArrayOf(0, 4, 8, 12)) for (i in 0 until 4) le[o + field + i] = f[o + field + 3 - i]
+            for (i in 0 until 8) le[o + 16 + i] = f[o + 16 + 7 - i]
+            o += 24 + incl
+        }
+        val (recs, how) = HciRing.read(le)
+        assertEquals("records from 16, little-endian", how)
+        assertEquals(300, HciRing.sending(recs)!!.handed)
+    }
+
+    @Test fun aCompressedRecord() {
+        val f = call()
+        val (recs, how) = HciRing.read(f.copyOf(16) + deflate(f.copyOfRange(16, f.size)))
+        assertEquals("compressed from 16", how)
+        assertEquals(HciRing.records(f).size, recs.size)
+        // The whole file compressed after a header of its own
+        assertEquals("compressed from 16, records from 16", HciRing.read(f.copyOf(16) + deflate(f)).second)
+    }
+
+    @Test fun aCompressedRecordCutShortStillGivesItsStart() {
+        val f = call()
+        val packed = deflate(f.copyOfRange(16, f.size))
+        val (recs, _) = HciRing.read(f.copyOf(16) + packed.copyOf(packed.size * 2 / 3))
+        assertTrue("${recs.size} records", recs.size > 100)
+    }
+
+    @Test fun android12sCompressedMemoryRecord() {
+        // version 2, the last packet's time (ms, little-endian), then per packet: kept + 1, real length, ms since the one before, kind
+        val body = ByteArrayOutputStream()
+        fun le(v: Int, n: Int) { for (i in 0 until n) body.write(v shr (8 * i) and 0xff) }
+        fun packet(deltaMs: Int, kind: Int, real: Int, vararg d: Int) { le(d.size + 1, 2); le(real, 2); le(deltaMs, 4); body.write(kind); d.forEach { body.write(it) } }
+        for (i in 0 until 300) {
+            packet(10, 0x21, 56, H, 0x00, 52, 0, 48, 0, 0x40, 0)                 // data out: link 2, 52 bytes
+            packet(0, 0x10, 7, 0x13, 5, 1, H, 0, 1, 0)                           // the chip: one packet sent
+        }
+        val pre = ByteArrayOutputStream().apply { write(2); val last = 1_800_000_000_000L; for (i in 0 until 8) write((last shr (8 * i)).toInt() and 0xff) }
+        val (recs, how) = HciRing.read(File().bytes() + pre.toByteArray() + deflate(body.toByteArray()))
+        assertEquals("compressed from 25, old layout 2", how)
+        val s = HciRing.sending(recs)!!
+        assertEquals(299, s.handed); assertEquals(52, s.bytesAvg); assertEquals(100.0, s.handed / s.seconds, 0.5)
+        assertEquals(Triple(0, 0, 0), s.waitMs)
+    }
+
+    @Test fun anUnreadableFileSaysWhatItLooksLike() {
+        val junk = File().bytes() + ByteArray(600) { (it * 7).toByte() }
+        assertTrue(HciRing.read(junk).first.isEmpty())
+        val p = HciRing.probe(junk)
+        assertTrue(p, p.startsWith("616 B, after the header 00070e151c232a31383f464d545b6269"))
+        assertTrue(p, p.endsWith("nothing compressed"))
+        // A layout the reader doesn't know still shows where its times are: every 30 bytes here
+        val f = ByteArrayOutputStream().apply { write(File().bytes()) }
+        for (i in 0 until 20) { f.write(ByteArray(22) { 1 }); f.write(byteArrayOf(0, 0xe3.toByte(), 0x3d, 1, 2, 3, 4, i.toByte())) }
+        assertTrue(HciRing.probe(f.toByteArray()), "times at 38 68 98 128" in HciRing.probe(f.toByteArray()))
+    }
+
     @Test fun nothingSent() {
         assertNull(HciRing.sending(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))
         assertEquals("1 records over 0.0 s", HciRing.size(HciRing.records(File().event(0.0, 0x0e, 1, 0x03, 0x0c, 0).bytes())))

@@ -282,11 +282,7 @@ object Relay {
 
     private fun onPeerFrame(d: Peer, bytes: ByteArray) {
         val env = runCatching { Envelope.parseFrom(bytes) }.getOrElse { Log.w(TAG, "bad frame: $it"); return }
-        if (env.bodyCase == Envelope.BodyCase.HELLO) {
-            // A link that outlived an app restart never "comes up" for this process: what it agreed on is looked up here
-            main.postDelayed({ LinkRadio.linkLook(onlyIfUnknown = true) }, 6_000)
-            return hello(d, env)
-        }
+        if (env.bodyCase == Envelope.BodyCase.HELLO) return hello(d, env)
         if (d.id !in trusted) {
             // A paired host whose app restarted while the link stayed up: ask for a fresh Hello instead of
             // rejecting (the client would otherwise sit on "not paired" until restarted, seen 16 Oct).
@@ -439,6 +435,9 @@ object Relay {
         }
         trusted.add(d.id)
         if (d is Peer.Ble) {
+            noHelloSince = 0
+            // What the link agreed on (LinkRadio): well after the Hello, when the link serves and nothing is being set up
+            main.postDelayed({ if (d.id in trusted) LinkRadio.linkLook() }, 20_000)
             HostWifi.evaluate("Bluetooth up")
             HotspotPause.transportChanged("Bluetooth back")
             // Remembered so the same iPhone can pair again on its own after iOS dropped its keys (see the receiver)
@@ -612,7 +611,30 @@ object Relay {
         // aren't ours to ask, and asking a rejected iPhone looped Hello / NOT_PAIRED every minute (29 Oct 2026, 23 times)
         val ours = app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
         if (pinned() == null || ours == null) return
-        ble.connectedDevices().filter { it.address == ours && it.address !in trusted && it.address !in rejected }.forEach { askForHello(it) }
+        val silent = ble.connectedDevices().filter { it.address == ours && it.address !in trusted && it.address !in rejected }
+        watchSilent(silent.firstOrNull())
+        silent.forEach { askForHello(it) }
+    }
+
+    @Volatile private var noHelloSince = 0L
+
+    /**
+     * The paired phone's Bluetooth link is up and the phone doesn't say Hello, keep-alive after keep-alive: the phone
+     * shows "connecting" meanwhile and nothing works over Bluetooth. An iPhone sat like that for three minutes after its
+     * host updated itself, until its owner paired again, and no report held the host's side of those minutes (a Redmi
+     * Note 9 Pro, 11 Nov 2026). So the host reports it by itself, with its log. [d]: the silent link, null when none.
+     */
+    private fun watchSilent(d: BluetoothDevice?) {
+        val now = SystemClock.elapsedRealtime()
+        if (d == null || pairingOpen() || runCatching { d.bondState }.getOrDefault(0) == BluetoothDevice.BOND_BONDING) { noHelloSince = 0; return }
+        if (noHelloSince == 0L) { noHelloSince = now; return }
+        val s = (now - noHelloSince) / 1000
+        if (s < 90) return
+        Log.w(TAG, "link ${d.address} has been up for $s s without a Hello")
+        Diag.event("link_no_hello", org.json.JSONObject().put("what", "bluetooth").put("seconds", s)
+            .put("bond", runCatching { d.bondState }.getOrDefault(-1))
+            .put("subscribed", ble.subscribers().any { it.address == d.address })
+            .put("dropped_once", d.address in droppedOnce))
     }
 
     private fun askForHello(d: BluetoothDevice) {

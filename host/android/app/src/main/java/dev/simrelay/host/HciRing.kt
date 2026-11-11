@@ -28,23 +28,137 @@ object HciRing {
     }
 
     /** The file's records in order; empty when it isn't a btsnoop file of serial-line (H4) packets. */
-    fun records(file: ByteArray): List<Rec> {
-        if (file.size < 16 || String(file, 0, 7, Charsets.US_ASCII) != "btsnoop" || be32(file, 12) != 1002L) return emptyList()
+    fun records(file: ByteArray): List<Rec> = read(file).first
+
+    /**
+     * The file's records and how they were found ("" = as Android writes them). A Galaxy A13 has the file with the right
+     * name and header in Samsung's own folder, and what follows the header is not Android's layout (11 Nov 2026, seen
+     * only as "not readable"). So the reader tries what a vendor could plausibly have done: the same records starting
+     * later or with their numbers the other way round, or the whole record compressed (as Android's memory record was
+     * before it became a file), in either of the two layouts. When nothing fits, [probe] says what the bytes look like.
+     */
+    fun read(file: ByteArray): Pair<List<Rec>, String> {
+        if (file.size < 16 || String(file, 0, 7, Charsets.US_ASCII) != "btsnoop" || be32(file, 12) != 1002L) return emptyList<Rec>() to ""
+        chain(file, 16, false).let { if (it.isNotEmpty()) return it to "" }
+        resync(file, 16)?.let { return it }
+        for ((at, plain) in inflated(file)) {
+            chain(plain, 0, false).let { if (it.size >= 8) return it to "compressed from $at" }
+            resync(plain, 0)?.let { return it.first to "compressed from $at, ${it.second}" }
+            // Android 12's memory record: a byte of version and the last packet's time before the compressed part
+            val lastMs = if (at >= 16 + 9) le64(file, at - 8) else 0L
+            for (v in intArrayOf(2, 1)) old(plain, v, lastMs).let { if (it.size >= 8) return it to "compressed from $at, old layout $v" }
+        }
+        return emptyList<Rec>() to ""
+    }
+
+    /** A record's time is microseconds since the year 0: its top two bytes are these from 2024 to 2042. */
+    private fun timely(t: Long) = (t ushr 48) == 0xe3L || (t ushr 48) == 0xe4L
+
+    /**
+     * Records one after another from [from], as far as they hold; [le]: the header's numbers little-endian. Nothing when
+     * the first one already isn't a record (a length that can't be, a time from another age).
+     */
+    private fun chain(b: ByteArray, from: Int, le: Boolean): List<Rec> {
+        fun u32(o: Int) = if (le) le32(b, o) else be32(b, o)
         val out = ArrayList<Rec>()
-        var o = 16
-        while (o + 24 <= file.size) {
-            val orig = be32(file, o); val incl = be32(file, o + 4).toInt(); val flags = be32(file, o + 8)
-            val t = (be32(file, o + 16) shl 32) or be32(file, o + 20)
+        var o = from
+        while (o + 24 <= b.size) {
+            val orig = u32(o); val incl = u32(o + 4); val flags = u32(o + 8)
+            val t = if (le) le64(b, o + 16) else (be32(b, o + 16) shl 32) or be32(b, o + 20)
+            if (incl < 1 || incl > orig || orig > 70_000 || flags > 3 || !timely(t)) break
             o += 24
-            if (incl < 1 || incl > 70_000 || o + incl > file.size) break        // cut off mid-record: what came before stands
-            out += Rec(t, flags and 1L == 1L, file[o].toInt() and 0xff, (orig - 1).toInt(), file.copyOfRange(o + 1, o + incl))
-            o += incl
+            if (o + incl > b.size) break                                    // cut off mid-record: what came before stands
+            out += Rec(t, flags and 1L == 1L, b[o].toInt() and 0xff, (orig - 1).toInt(), b.copyOfRange(o + 1, (o + incl).toInt()))
+            o += incl.toInt()
         }
         return out
     }
 
+    /** The first place within 8 KiB after [from] where eight records in a row start, either byte order. */
+    private fun resync(b: ByteArray, from: Int): Pair<List<Rec>, String>? {
+        for (le in booleanArrayOf(false, true)) for (o in from until minOf(b.size - 24, from + 8192)) {
+            if (o == from && !le) continue
+            val r = chain(b, o, le)
+            if (r.size >= 8) return r to "records from $o${if (le) ", little-endian" else ""}"
+        }
+        return null
+    }
+
+    /** Every compressed stream that starts in the first bytes after the header and unpacks to something: (where, what). */
+    private fun inflated(file: ByteArray): List<Pair<Int, ByteArray>> {
+        val out = ArrayList<Pair<Int, ByteArray>>()
+        for (at in 16 until minOf(file.size - 2, 96)) {
+            val b0 = file[at].toInt() and 0xff; val b1 = file[at + 1].toInt() and 0xff
+            val zlib = b0 and 0x0f == 8 && (b0 shr 4) <= 7 && ((b0 shl 8) or b1) % 31 == 0
+            val gzip = b0 == 0x1f && b1 == 0x8b
+            if (!zlib && !gzip) continue
+            // Whatever unpacks before the stream ends or breaks: a record cut short is still a record
+            val plain = java.io.ByteArrayOutputStream()
+            runCatching {
+                val src = file.inputStream(at, file.size - at)
+                (if (gzip) java.util.zip.GZIPInputStream(src) else java.util.zip.InflaterInputStream(src)).use { z ->
+                    val buf = ByteArray(16_384)
+                    while (plain.size() < MAX_PLAIN) { val n = z.read(buf); if (n <= 0) break; plain.write(buf, 0, n) }
+                }
+            }
+            if (plain.size() >= 64) out += at to plain.toByteArray()
+        }
+        return out
+    }
+    private const val MAX_PLAIN = 8 * 1024 * 1024
+
+    /**
+     * Android 12's memory record once unpacked: per packet its kept length + 1, (from version 2) its real length, the
+     * milliseconds since the packet before, and a kind (0x10 event, 0x11 data in, 0x20 command, 0x21 data out), all
+     * little-endian, then the bytes kept. Nothing unless the whole of [b] reads that way. [lastMs]: the last packet's time.
+     */
+    private fun old(b: ByteArray, version: Int, lastMs: Long): List<Rec> {
+        val head = if (version == 2) 9 else 7
+        class E(val len: Int, val orig: Int, val delta: Long, val type: Int, val at: Int)
+        val es = ArrayList<E>()
+        var o = 0
+        while (o + head <= b.size) {
+            val len = le16(b, o)
+            val orig = if (version == 2) le16(b, o + 2) else len - 1
+            val delta = le32(b, o + head - 5); val type = b[o + head - 1].toInt() and 0xff
+            if (len < 1 || type !in OLD_KINDS || o + head + len - 1 > b.size) return emptyList()
+            es += E(len, orig, delta, type, o + head)
+            o += head + len - 1
+        }
+        if (o != b.size) return emptyList()
+        var t = (lastMs - es.sumOf { it.delta }) * 1000
+        return es.map { e ->
+            t += e.delta * 1000
+            Rec(t, e.type < 0x20, OLD_KINDS.getValue(e.type), e.orig, b.copyOfRange(e.at, e.at + e.len - 1))
+        }
+    }
+    private val OLD_KINDS = mapOf(0x10 to 4, 0x11 to 2, 0x12 to 3, 0x17 to 5, 0x20 to 1, 0x21 to 2, 0x22 to 3, 0x2d to 5)
+
+    /**
+     * What an unreadable file looks like, for whoever has to teach the reader: the 32 bytes after the header (a record's
+     * header and the first bytes of a packet: its kind, never an address or content), where times stand in the first
+     * kilobytes (they give the records' spacing), and how a compressed stream found in it starts.
+     */
+    fun probe(file: ByteArray): String {
+        fun hex(b: ByteArray, from: Int, n: Int) = (from until minOf(b.size, from + n)).joinToString("") { "%02x".format(b[it]) }
+        fun marks(b: ByteArray): String {
+            val be = ArrayList<Int>(); val le = ArrayList<Int>()
+            for (o in 0 until minOf(b.size - 8, 4096)) {
+                if (b[o].toInt() == 0 && (b[o + 1].toInt() and 0xff).let { it == 0xe3 || it == 0xe4 }) be += o
+                if (b[o + 7].toInt() == 0 && (b[o + 6].toInt() and 0xff).let { it == 0xe3 || it == 0xe4 }) le += o
+            }
+            return "times at ${be.take(8).joinToString(" ").ifEmpty { "-" }} / reversed ${le.take(8).joinToString(" ").ifEmpty { "-" }}"
+        }
+        val packed = inflated(file).firstOrNull()
+        return "${file.size} B, after the header ${hex(file, 16, 32)}, ${marks(file)}" +
+            (packed?.let { (at, plain) -> ", compressed from $at: ${plain.size} B starting ${hex(plain, 0, 24)}, ${marks(plain)}" } ?: ", nothing compressed")
+    }
+
     private fun be32(b: ByteArray, o: Int): Long =
         ((b[o].toLong() and 0xff) shl 24) or ((b[o + 1].toLong() and 0xff) shl 16) or ((b[o + 2].toLong() and 0xff) shl 8) or (b[o + 3].toLong() and 0xff)
+    private fun le16(b: ByteArray, o: Int): Int = (b[o].toInt() and 0xff) or ((b[o + 1].toInt() and 0xff) shl 8)
+    private fun le32(b: ByteArray, o: Int): Long = le16(b, o).toLong() or (le16(b, o + 2).toLong() shl 16)
+    private fun le64(b: ByteArray, o: Int): Long = le32(b, o) or (le32(b, o + 4) shl 32)
 
     // ---- what a link agreed
 
@@ -142,27 +256,28 @@ object HciRing {
      */
     fun sending(recs: List<Rec>): Sending? {
         val out = recs.filter { it.kind == 2 && !it.fromChip && it.d.size >= 4 }
-        // The chip's reports, in order: (time, link, packets)
-        val reported = ArrayList<Triple<Long, Int, Int>>()
-        for (r in recs) if (r.kind == 4 && r.u8(0) == 0x13) for (i in 0 until r.u8(2)) {
-            reported += Triple(r.t, r.u16(3 + i * 4) and 0x0fff, r.u16(5 + i * 4))
+        /** What a record of the chip says it sent on [link]: 0 unless it is such a report. */
+        fun reported(r: Rec, link: Int): Int {
+            if (r.kind != 4 || r.u8(0) != 0x13) return 0
+            return (0 until r.u8(2)).sumOf { i -> if (r.u16(3 + i * 4) and 0x0fff == link) r.u16(5 + i * 4) else 0 }
         }
-        val h = out.groupingBy { it.handle }.eachCount().maxByOrNull { it.value }?.key
-            ?: reported.groupBy { it.second }.maxByOrNull { e -> e.value.sumOf { it.third } }?.key ?: return null
-        val done = reported.filter { it.second == h }.map { it.first to it.third }
-        val t1 = out.lastOrNull { it.handle == h }?.t ?: done.last().first
+        val h = out.groupingBy { it.handle }.eachCount().maxByOrNull { it.value }?.key ?: run {
+            val perLink = HashMap<Int, Int>()
+            for (r in recs) if (r.kind == 4 && r.u8(0) == 0x13) for (i in 0 until r.u8(2)) perLink.merge(r.u16(3 + i * 4) and 0x0fff, r.u16(5 + i * 4), Int::plus)
+            perLink.maxByOrNull { it.value }?.key ?: return null
+        }
+        val t1 = out.lastOrNull { it.handle == h }?.t ?: recs.last { reported(it, h) > 0 }.t
         val t0 = maxOf(recs.first().t, t1 - WINDOW_US)
         if (t1 <= t0) return null
         // Packets already in the chip when the record starts are reported too: without them every later packet would
         // look sent a few places early. Their number is how far the reports ever run ahead of what the record saw handed.
         var ahead = 0
         run {
-            var sentSoFar = 0; var doneSoFar = 0; var i = 0
+            var sentSoFar = 0; var doneSoFar = 0
             for (r in recs) {
-                while (i < done.size && done[i].first <= r.t) { doneSoFar += done[i].second; i++; ahead = maxOf(ahead, doneSoFar - sentSoFar) }
                 if (r.kind == 2 && !r.fromChip && r.d.size >= 4 && r.handle == h) sentSoFar++
+                else reported(r, h).let { if (it > 0) { doneSoFar += it; ahead = maxOf(ahead, doneSoFar - sentSoFar) } }
             }
-            while (i < done.size) { doneSoFar += done[i].second; i++; ahead = maxOf(ahead, doneSoFar - sentSoFar) }
         }
 
         val queue = ArrayDeque<Long>().apply { repeat(ahead) { addLast(-1L) } }
@@ -172,7 +287,6 @@ object HciRing {
         fun bin(t: Long) = if (t in (t0 + 1)..t1) bins - 1 - ((t1 - t) / HALF_US).toInt() else -1
         var handed = 0; var bytes = 0L; var bytesMax = 0; var sent = 0; var reports = 0; var queueMax = 0
         var received = 0; var credits = 0; var pause = 0L; var lastReport = 0L; var handPause = 0L; var lastHanded = 0L
-        var i = 0
         fun report(t: Long, n: Int) {
             repeat(n) { val s = queue.removeFirstOrNull() ?: return@repeat; if (s >= t0 && t <= t1 + 1_000_000) waits += ((t - s) / 1000).toInt() }
             if (t !in (t0 + 1)..t1) return
@@ -182,7 +296,8 @@ object HciRing {
             lastReport = t
         }
         for (r in recs) {
-            while (i < done.size && done[i].first <= r.t) { report(done[i].first, done[i].second); i++ }
+            // In the record's own order: a packet and its report can carry the same time
+            reported(r, h).let { if (it > 0) report(r.t, it) }
             if (r.kind != 2 || r.d.size < 4 || r.handle != h) continue
             val inWindow = r.t in (t0 + 1)..t1
             if (r.fromChip) {
@@ -199,7 +314,6 @@ object HciRing {
             handed++; bytes += r.u16(2); bytesMax = maxOf(bytesMax, r.u16(2)); queueMax = maxOf(queueMax, queue.size)
             bin(r.t).let { if (it in 0 until bins) handedBin[it]++ }
         }
-        while (i < done.size) { report(done[i].first, done[i].second); i++ }
         if (handed == 0 && sent == 0) return null
         waits.sort()
         fun at(q: Double) = if (waits.isEmpty()) 0 else waits[((waits.size - 1) * q).toInt()]

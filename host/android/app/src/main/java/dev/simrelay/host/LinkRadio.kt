@@ -54,7 +54,7 @@ object LinkRadio {
     }
 
     /** A new link starts on 1M whatever the last one ran on. */
-    fun linkUp() { inUse = "?"; links = emptyMap(); note("link up") }
+    fun linkUp() { inUse = "?"; links = emptyMap(); linkLooked = false; note("link up") }
 
     // ---- who scans
 
@@ -117,12 +117,17 @@ object LinkRadio {
 
     @Volatile private var links: Map<Int, HciRing.Link> = emptyMap()
     @Volatile private var buffers = ""
-    @Volatile private var lastLinkLook = 0L
+    @Volatile private var linkLooked = false
+
+    private val MTK = Regex("""\bmt\d{4}""", RegexOption.IGNORE_CASE)
+    /** A MediaTek chip, by the names a phone gives it. Pure (LinkRadioTest). */
+    fun isMediatek(names: List<String>): Boolean = names.any { it.contains("mediatek", ignoreCase = true) || MTK.containsMatchIn(it) }
+    private val mediatek: Boolean by lazy { isMediatek(listOf(Compat.soc(), Compat.prop("ro.board.platform"), android.os.Build.HARDWARE)) }
 
     /**
      * One root command, two seconds or three: the Bluetooth dump's scanner list, then the record of the chip's traffic
-     * that the same dump has just written ([HciRing]). Only numbers leave here. Asked at a call's end and a few seconds
-     * after a link comes up, never during a call: the dump runs inside the Bluetooth stack. Never throws.
+     * that the same dump has just written ([HciRing]). Only numbers leave here. Asked at a call's end and by [linkLook],
+     * never during a call: the dump runs inside the Bluetooth stack. Never throws.
      */
     fun look(): Look = runCatching {
         val r = Root.sh("dumpsys bluetooth_manager | sed -n '/GATT Scanner Map/,/GATT Advertiser Map/p;/Le scan:/p' | head -c 16000; " +
@@ -140,28 +145,28 @@ object LinkRadio {
         val age = rest.substringBefore('\n').removePrefix("age ").trim().toLongOrNull() ?: -1
         val b64 = rest.substringAfter('\n').filterNot { it.isWhitespace() }.removeSuffix("timeout")
         val file = java.util.Base64.getDecoder().decode(b64.take(b64.length - b64.length % 4))
-        val recs = HciRing.records(file)
-        if (recs.isEmpty()) return@runCatching Look(scans, null,
-            "record not readable (${file.size} B, starts ${file.take(16).joinToString("") { "%02x".format(it) }})", "")
+        val (recs, how) = HciRing.read(file)
+        val stale = if (age in 0..5) "" else ", written $age s ago"
+        if (recs.isEmpty()) return@runCatching Look(scans, null, "record not readable (${HciRing.probe(file)}$stale)", "")
         links = HciRing.links(recs, links)
         HciRing.buffers(recs).let { if (it.isNotEmpty()) buffers = it }
         val s = HciRing.sending(recs)
-        val stale = if (age in 0..5) "" else ", written $age s ago"
         val link = (s?.let { links[it.handle] } ?: links.values.singleOrNull())?.text().orEmpty() +
             if (buffers.isEmpty()) "" else ", chip room $buffers"
-        Look(scans, s, (s?.text() ?: "no data sent") + " | ${HciRing.size(recs)}$stale", link.removePrefix(", "))
+        Look(scans, s, (s?.text() ?: "no data sent") + " | ${HciRing.size(recs)}${if (how.isEmpty()) "" else ", $how"}$stale", link.removePrefix(", "))
     }.getOrElse { Look("", null, "failed: ${it.javaClass.simpleName}", "") }
 
     /**
-     * A link came up a few seconds ago: what it agreed on (packet length, interval), while the record still holds it.
-     * A call's audio pushes that out of the record within seconds. Not in a call, at most once a minute.
-     * [onlyIfUnknown]: a client said hello, which it does every few minutes; one look is enough. Any thread.
+     * What a link agreed on (packet length, interval), while the record still holds it: a call's audio pushes that out
+     * within seconds. Once per link, 20 s after the phone's Hello, on MediaTek hosts only: theirs is the sending that
+     * needs explaining, and a look is a dump inside the Bluetooth stack. 0.12.32 looked on every full-voice host 6 s
+     * after a link came up, which is when a restarted host may be dropping that link or switching Bluetooth off and on to
+     * get an iPhone's Hello; an iPhone did not get back to its Redmi Note 9 Pro over Bluetooth for three minutes after
+     * that host updated itself (11 Nov 2026). Nothing shows the look caused it; it no longer runs there. Any thread.
      */
-    fun linkLook(onlyIfUnknown: Boolean = false) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (!VoiceGate.fullVoice || CallRegistry.anyCall() || (lastLinkLook != 0L && now - lastLinkLook < 60_000)) return
-        if (onlyIfUnknown && lastLinkLook != 0L) return
-        lastLinkLook = now
+    fun linkLook() {
+        if (!mediatek || linkLooked || !VoiceGate.fullVoice || CallRegistry.anyCall()) return
+        linkLooked = true
         Thread {
             val l = look()
             Log.i(TAG, "BLE link: ${l.link.ifEmpty { l.hci }}")

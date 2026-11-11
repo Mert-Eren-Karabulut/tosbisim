@@ -2,12 +2,24 @@
 package dev.simrelay.host
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkRadioTest {
     @Test fun everyHostAsksFor2M() {
         // 1M was tried on MediaTek hosts (0.12.31): a Galaxy A13 really ran on it and its calls stayed choppy (10 Nov 2026)
         assertEquals(LinkRadio.MASK_2M, LinkRadio.mask)
+    }
+
+    @Test fun mediatekChipsByName() {
+        // Galaxy A13: Build.SOC_MANUFACTURER + SOC_MODEL, ro.board.platform, Build.HARDWARE
+        assertTrue(LinkRadio.isMediatek(listOf("Mediatek MT6769V/CT", "mt6768", "mt6768")))
+        assertTrue(LinkRadio.isMediatek(listOf("", "", "mt6765")))
+        assertFalse(LinkRadio.isMediatek(listOf("QTI SM8250", "kona", "qcom")))
+        assertFalse(LinkRadio.isMediatek(listOf("Samsung Exynos7870", "universal7870", "samsungexynos7870")))
+        assertFalse(LinkRadio.isMediatek(listOf("Unisoc T606", "ums9230", "ums9230_4h10")))
+        assertFalse(LinkRadio.isMediatek(emptyList()))
     }
 
     @Test fun modeNames() {

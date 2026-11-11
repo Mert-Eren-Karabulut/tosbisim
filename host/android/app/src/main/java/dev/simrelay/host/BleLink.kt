@@ -343,8 +343,6 @@ class BleLink(
                 resetStream(device.address)
                 LinkRadio.linkUp()
                 askPhy(device, "connected")
-                // What the link agreed on, once the two sides have settled it (packet length, interval): LinkRadio
-                main.postDelayed({ LinkRadio.linkLook() }, 6_000)
                 return
             }
             // A false DISCONNECTED comes from a short duplicate connection while the real link stays up (M1 spike)

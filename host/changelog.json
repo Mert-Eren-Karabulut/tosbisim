@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.34",
+    "code": 70,
+    "en": "On a Samsung host the record of the Bluetooth chip's traffic was found but could not be read: Samsung stores it in a layout of its own. The host now tries the layouts a phone maker could plausibly use, and when none fits it reports what the file's first bytes look like (its layout, never an address or content).\nThe extra look at Bluetooth that 0.12.32 took a few seconds after every connection now happens only on hosts with a MediaTek chip, and only once the phone is connected and working.\nIf the paired phone stays connected over Bluetooth without the two apps getting to talk, the host now reports that by itself with its log.",
+    "tr": "Samsung ana cihazda Bluetooth çipinin trafik kaydı bulundu ama okunamadı: Samsung onu kendine özgü bir düzende saklıyor. Ana cihaz artık bir üreticinin kullanmış olabileceği düzenleri deniyor; hiçbiri uymazsa dosyanın ilk baytlarının neye benzediğini bildiriyor (yalnızca düzeni; adres ya da içerik asla).\n0.12.32'nin her bağlantıdan birkaç saniye sonra Bluetooth'a yaptığı ek bakış artık yalnızca MediaTek çipli ana cihazlarda ve telefon bağlanıp çalışmaya başladıktan sonra yapılıyor.\nEşleştirilmiş telefon Bluetooth ile bağlı kaldığı halde iki uygulama konuşamıyorsa, ana cihaz artık bunu günlüğüyle birlikte kendiliğinden bildiriyor."
+  },
+  {
     "version": "0.12.33",
     "code": 69,
     "en": "The numbers about the Bluetooth chip that 0.12.32 added to each call were missing on Samsung hosts: the host looked for Android's record in the wrong place there. It now finds it.",
