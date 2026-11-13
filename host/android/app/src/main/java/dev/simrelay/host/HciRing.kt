@@ -186,7 +186,22 @@ object HciRing {
             },
             if (askedTxBytes > 0) "host asked ${askedTxBytes} B" else null,
             phy.ifEmpty { null }).joinToString(", ")
+
+        /**
+         * Whether this link sends in the smallest radio packets (27 bytes); null when the record doesn't say. Only on
+         * what the record holds: a length the two sides agreed, or the host's own Bluetooth asking for no more than 27
+         * (a link never gets more than its host asks for). A record that merely shows no change is not proof: one
+         * that leaves such events out would make every link look small.
+         */
+        val small: Boolean? get() = when {
+            txBytes > SMALLEST -> false
+            txBytes in 1..SMALLEST -> true
+            askedTxBytes in 1..SMALLEST -> true
+            else -> null
+        }
     }
+    /** The radio packet every Bluetooth LE link starts with, and keeps unless both sides agree on more. */
+    const val SMALLEST = 27
 
     /**
      * Every link in [recs], on top of what was [known] before (an earlier look, taken when the link came up: by a

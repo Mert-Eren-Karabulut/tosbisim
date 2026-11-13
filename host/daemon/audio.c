@@ -147,6 +147,7 @@ static int ta_load(void) {
 #define HDR 3                  // [u16 seq][u8 flags]
 #define BITRATE 24000
 #define LOSS_PERC 10
+#define FRAME_MAX_LEAST 10     // 8 kbit/s: under that a 10 ms frame of wideband speech has nothing left to say
 
 #define JB_SLOTS 64            // ring size (power of two)
 #define JB_MASK (JB_SLOTS - 1)
@@ -208,6 +209,10 @@ static unsigned g_st_played, g_st_depth_max;
 // queued in the inject PCM after each write, frames waiting in the capture PCM before each read.
 static double g_st_jb_sum;
 static unsigned g_st_jb_n, g_st_reopen;
+// The most bytes one frame of the caller's audio may take (FRAME_MAX), 0 = no cap. For a Bluetooth link that carries
+// two 27-byte radio packets per connection slot and no more: two capped frames then fit one slot (a Galaxy A13 host,
+// 13 Nov 2026). Belongs to the audio client that asked: a new client and a new call start without it.
+static volatile int g_frame_max;
 static volatile int g_stall_ms;          // debug: one playback stall (STALL command)   // playback frames written; max jitter depth   // max |sample| captured in the window: 0 = the caller path is silent
 
 static void set_realtime(const char *who) {
@@ -376,6 +381,7 @@ static void *io_main(void *arg) {
                 } else {
                     LOGI("audio client connected (uid=%d)%s", (int)cr.uid, fd >= 0 ? ", replacing the previous one" : "");
                     client_set(nfd);                     // closes the previous client's fd
+                    g_frame_max = 0;                     // the cap was the previous client's link's
                     fd = nfd;
                     jb_reset();
                     continue;
@@ -487,7 +493,18 @@ static void *capture_main(void *arg) {
     // One 10 ms period per read, paced by the DSP. Errors are rare with the system tinyalsa; the cap below
     // still stops a failing stream from storming the audio DSP (a storm rebooted the phone once).
     unsigned consecutive_err = 0;
+    int capped = 0;                                               // the frame cap the encoder is set for
     while (g_call_running) {
+        int want = g_frame_max;
+        if (want != capped) {
+            // A cap is a bit rate too (bytes x 8 x 100 frames a second); what it leaves has no room for a second copy
+            // of the frame before (in-band FEC), and the link it is for loses nothing, it only delays
+            capped = want;
+            opus_encoder_ctl(enc, OPUS_SET_BITRATE(want ? want * 800 : BITRATE));
+            opus_encoder_ctl(enc, OPUS_SET_INBAND_FEC(want ? 0 : 1));
+            opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(want ? 0 : LOSS_PERC));
+            if (want) LOGI("audio: caller frames capped at %d bytes", want); else LOGI("audio: caller frames uncapped");
+        }
         if (!pcm) {
             struct timespec slow = { .tv_nsec = 100 * 1000 * 1000 };
             pcm = pcm_hold(LIVE_CAP, open_pcm(g_cfg.capture_pcm, PCM_IN, (unsigned)crate, (unsigned)cch, (unsigned)cframe));
@@ -535,7 +552,7 @@ static void *capture_main(void *arg) {
         g_tot_cap += CAP_FRAMES_PER_READ;
         if (rpeak > VOICED_PEAK) g_tot_voiced += CAP_FRAMES_PER_READ;
         for (int f = 0; f < CAP_FRAMES_PER_READ; f++) {
-        int len = opus_encode(enc, pcmbuf + f * cframe, cframe, pkt + HDR, MAX_PACKET);
+        int len = opus_encode(enc, pcmbuf + f * cframe, cframe, pkt + HDR, capped ? capped : MAX_PACKET);
         if (len < 0) { LOGW("opus encode: %d", len); continue; }
         if (len <= 2) { seq++; continue; }    // DTX: nothing to send, but keep seq = time
         pkt[0] = (uint8_t)(seq & 0xff);
@@ -702,6 +719,12 @@ int audio_tune(int prime, int keep, int period) {
 
 void audio_stall(int ms) { if (ms > 0 && ms <= 500) g_stall_ms = ms; }
 
+int audio_frame_max(int bytes) {
+    if (bytes != 0 && (bytes < FRAME_MAX_LEAST || bytes > MAX_PACKET)) return -1;
+    g_frame_max = bytes;
+    return 0;
+}
+
 void audio_tune_get(char *buf, size_t n) {
     snprintf(buf, n, "prime=%d keep=%d period=%d", g_jb_prime, g_jb_keep, g_play_period);
 }
@@ -717,6 +740,7 @@ void audio_call_begin(const audio_cfg_t *cfg) {
     g_tot_txdrop = g_tot_noclient = g_tot_recv = g_tot_plc = g_tot_starved = g_tot_live = 0;
     g_tot_capms = g_tot_caperr = 0;
     g_tot_peak = 0;
+    g_frame_max = 0;
     if (g_call_running) audio_call_end();
     g_cfg = *cfg;
     jb_reset();

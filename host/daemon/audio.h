@@ -28,6 +28,9 @@ void audio_totals(char *buf, size_t n);     // since audio_call_begin: frames ca
 int audio_tune(int prime, int keep, int period);
 void audio_tune_get(char *buf, size_t n);
 void audio_stall(int ms);                   // debug: stall the inject loop once (tests self-healing)
+// The most bytes one 10 ms frame of the caller's audio may take until the next audio client or call; 0 = no cap.
+// -1 for a value no frame can keep.
+int audio_frame_max(int bytes);
 
 // Stop everything and free resources (daemon exit).
 void audio_shutdown(void);

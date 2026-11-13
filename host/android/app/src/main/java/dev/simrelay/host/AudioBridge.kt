@@ -35,6 +35,8 @@ internal fun LocalSocket.closeNow() {
  *
  * One L2CAP server channel, its PSM published in the GATT AUDIO_PSM characteristic. The iPhone reads the
  * PSM and connects when it answers a call; on connect we open the daemon socket and run two pump threads.
+ *
+ * A link of small radio packets that stops keeping up goes lean for the rest of the channel ([LeanAudio]).
  */
 @SuppressLint("MissingPermission")
 class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLink) {
@@ -111,10 +113,22 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         val qLock = ReentrantLock()
         val ready = qLock.newCondition()
         val st = IntArray(7)                         // frames in, frames out, writes, dropped, slowest write (ms), bytes out, ms blocked
+        // Lean ([LeanAudio]): only a link of small radio packets, only once it struggles, for the rest of this channel
+        val lean = AtomicBoolean(false)
+        val leanAsked = AtomicBoolean(false)
+        val goLean = { why: String ->
+            Log.w(TAG, "audio to the phone: $why: asking the daemon for ${LeanAudio.FRAME}-byte frames, two a write")
+            Daemon.frameMax(LeanAudio.FRAME) { ok ->
+                if (ok && alive.get()) { lean.set(true); CallAudioCheck.leanOn() }
+                else if (!ok) Log.w(TAG, "audio to the phone: the daemon doesn't cap frames, staying as it is")
+            }
+        }
         val down = Thread({
             val din = ds.inputStream
             val buf = ByteArray(MAX)
             var stallLogged = 0L
+            val watch = LeanAudio.Watch(patient = RemoteLink.enabled)
+            var secondFrom = SystemClock.elapsedRealtime(); var secondDropped = 0
             try {
                 while (alive.get()) {
                     val n = din.read(buf)
@@ -127,12 +141,23 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                     qLock.lock()
                     try {
                         q.addLast(framed); st[0]++; CallAudioCheck.frameIn()
-                        while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true; CallAudioCheck.dropped() }
+                        while (q.size > BACKLOG) { q.removeFirst(); st[3]++; secondDropped++; dropped = true; CallAudioCheck.dropped() }
                         ready.signal()
                     } finally { qLock.unlock() }
                     // A write that never returns logs nothing itself: say so from here (a client got no caller audio
                     // for 15 s while its own audio still reached the host, 6 Nov 2026)
                     val now = SystemClock.elapsedRealtime()
+                    if (now - secondFrom >= 1000) {
+                        val troubled = watch.second(secondDropped)
+                        secondFrom = now; secondDropped = 0
+                        // (the daemon's frames are coming, so the call's audio is up: the cap would not outlive its start)
+                        val why = when {
+                            LeanAudio.always -> "lean from the start (debug)"
+                            troubled && LinkRadio.smallPackets -> "this link sends in small radio packets and isn't keeping up"
+                            else -> null
+                        }
+                        if (why != null && leanAsked.compareAndSet(false, true)) goLean(why)
+                    }
                     if (dropped && now - stallLogged > 5000) {
                         stallLogged = now
                         // With what the radios were doing: a stall's cause is one of them, and the line alone never said
@@ -149,10 +174,18 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
             try {
                 while (alive.get()) {
                     var n = 0; var frames = 0
+                    val small = lean.get()
                     qLock.lock()
                     try {
                         while (q.isEmpty() && alive.get()) ready.await(200, TimeUnit.MILLISECONDS)
-                        while (q.isNotEmpty() && (n == 0 || n + q.first().size <= maxTx)) {
+                        // Lean: two frames a write, never more than two radio packets' worth. A frame from before the
+                        // cap is larger and goes alone.
+                        if (small) {
+                            var left = TimeUnit.MILLISECONDS.toNanos(LeanAudio.PAIR_WAIT_MS)
+                            while (q.size < 2 && alive.get() && left > 0) left = ready.awaitNanos(left)
+                        }
+                        val room = if (small) LeanAudio.WRITE else maxTx
+                        while (q.isNotEmpty() && (n == 0 || n + q.first().size <= room)) {
                             val f = q.removeFirst(); System.arraycopy(f, 0, buf, n, f.size); n += f.size; frames++
                         }
                     } finally { qLock.unlock() }
@@ -171,7 +204,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                             // already log every 5 s in the daemon's line
                             if (st[3] > 0 || st[2] < st[1] || st[4] >= 40)
                                 Log.i(TAG, "audio to the phone 5s: frames=${st[1]}/${st[0]} writes=${st[2]} dropped=${st[3]} slowest write=${st[4]} ms " +
-                                    "bytes=${st[5]} blocked=${st[6]} ms (max $maxTx B)")
+                                    "bytes=${st[5]} blocked=${st[6]} ms (max $maxTx B${if (small) ", lean" else ""})")
                             st.fill(0)
                         }
                     } finally { qLock.unlock() }
@@ -199,6 +232,9 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
             runCatching { l2cap.close() }
             ds.closeNow()
             down.join(500); send.join(500)
+            // The cap was this channel's: whatever carries the call next starts without it (the daemon lifts it for a
+            // new audio client by itself; this covers the answer to a late request)
+            if (leanAsked.get()) Daemon.frameMax(0)
             Log.i(TAG, "audio bridge down")
         }
     }

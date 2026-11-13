@@ -22,6 +22,8 @@
 //   SET keys: capture, rec_config, inject.1, inject.2, mute.tx, mute.rx, mute.vsid, mute.ramp
 //   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
 //   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
+//   FRAME_MAX <n>  -> OK | ERR   (each 10 ms frame of the caller's audio at most n bytes, 0 = no cap; until the next
+//                                 audio client or call: for a Bluetooth link that carries very little per slot)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
 //                     starved= live= capms= caperr=   (this call's totals: the call test, the app's end-of-call checks)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <percent> | CHARGE? -> OK <node>|ERR
@@ -756,6 +758,10 @@ static void handle_line(int fd, char *line) {
         char *v = strtok(NULL, " ");
         audio_stall(v ? atoi(v) : 0);
         reply(fd, "OK");
+    } else if (strcmp(cmd, "FRAME_MAX") == 0) {         // FRAME_MAX <bytes>: cap each caller frame (0 = no cap)
+        char *v = strtok(NULL, " ");
+        if (!v || audio_frame_max(atoi(v)) < 0) reply(fd, "ERR bad value");
+        else reply(fd, "OK");
     } else if (strcmp(cmd, "TUNE") == 0) {              // TUNE [prime keep period]: audio latency trade-offs
         char *a = strtok(NULL, " "), *b = strtok(NULL, " "), *c = strtok(NULL, " ");
         char t[80];

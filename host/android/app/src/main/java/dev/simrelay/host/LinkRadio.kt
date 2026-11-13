@@ -106,6 +106,42 @@ object LinkRadio {
         return (list.take(480) + if (stack.isEmpty()) "" else " | $stack")
     }
 
+    // ---- small radio packets
+
+    private var prefs: android.content.SharedPreferences? = null
+    @Volatile private var small: Boolean? = null
+
+    /** adb debug (AUDIO_LEAN): treat this host's link as one of small packets until the app restarts. */
+    @Volatile var smallForced = false
+
+    /** Reads what earlier looks learned about this host's link (HostApp, once). */
+    fun init(ctx: android.content.Context) {
+        val p = ctx.applicationContext.getSharedPreferences("link", android.content.Context.MODE_PRIVATE)
+        prefs = p
+        if (p.contains("small")) small = p.getBoolean("small", false)
+    }
+
+    /**
+     * This host's Bluetooth link sends in the smallest radio packets, 27 bytes: seen in the chip's record ([look]), by
+     * this run or an earlier one (a call can start before the first look at a new link). A Galaxy A13's chip allows
+     * no more (12 Nov 2026), and such a link is the only one whose call audio may go lean ([LeanAudio]). False until
+     * a record says so: on every other host a struggling link means the phone is leaving Bluetooth range, and that
+     * call belongs on the internet, not on a lower bit rate.
+     */
+    val smallPackets: Boolean get() = smallForced || small == true
+
+    /** For a call's numbers: "yes", "no", "?" (no record ever said), "forced". */
+    fun smallText(): String = when { smallForced -> "forced"; small == null -> "?"; small == true -> "yes"; else -> "no" }
+
+    /** A look saw what the link agreed. Pure but for the stored copy. */
+    internal fun learned(link: HciRing.Link?) {
+        val s = link?.small ?: return
+        if (s == small) return
+        small = s
+        Log.i(TAG, "BLE link: ${if (s) "small radio packets (27 B) on this host" else "radio packets longer than 27 B on this host"}")
+        runCatching { prefs?.edit()?.putBoolean("small", s)?.apply() }
+    }
+
     // ---- one look at the Bluetooth stack: who scans, and what the chip did
 
     // Where Android writes the record, and where Samsung's does (a Galaxy A13 on Android 14, 11 Nov 2026)
@@ -151,8 +187,10 @@ object LinkRadio {
         links = HciRing.links(recs, links)
         HciRing.buffers(recs).let { if (it.isNotEmpty()) buffers = it }
         val s = HciRing.sending(recs)
+        val agreed = s?.let { links[it.handle] } ?: links.values.singleOrNull()
+        learned(agreed)
         // With how many links share the chip: its room is divided between them
-        val link = (s?.let { links[it.handle] } ?: links.values.singleOrNull())?.text().orEmpty() +
+        val link = agreed?.text().orEmpty() +
             (if (buffers.isEmpty()) "" else ", chip room $buffers") + (if (links.size > 1) ", ${links.size} links up" else "")
         Look(scans, s, (s?.text() ?: "no data sent") + " | ${HciRing.size(recs)}${if (how.isEmpty()) "" else ", $how"}$stale", link.removePrefix(", "))
     }.getOrElse { Look("", null, "failed: ${it.javaClass.simpleName}", "") }

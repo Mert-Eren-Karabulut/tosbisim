@@ -114,6 +114,16 @@ object Daemon {
             .put("seconds", seconds).put("daemon", reply))
     }
 
+    /**
+     * The most bytes one frame of the caller's audio may take from now on, 0 = no cap again ([LeanAudio]). [done] hears
+     * whether the daemon took it, on the daemon thread. The daemon lifts a cap by itself for the next audio client and
+     * the next call.
+     */
+    fun frameMax(bytes: Int, done: (Boolean) -> Unit = {}) = exec.execute {
+        if (activeSession == 0) return@execute                             // the call is over: nothing left to cap
+        done(request("FRAME_MAX $bytes")?.startsWith("OK") == true)
+    }
+
     fun status() = exec.execute { request("STATUS") }
 
     fun hasProfile(): Boolean = profile != null
