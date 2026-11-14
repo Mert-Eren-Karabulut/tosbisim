@@ -21,11 +21,15 @@ object CallAudioCheck {
                       val slowestMs: Long, val stalls: Long, val bytesOut: Long = 0, val blockedMs: Long = 0,
                       val leanFromIn: Long = -1, val leanFromDropped: Long = 0) {
         /**
-         * What going lean ([LeanAudio]) did, for a call's numbers: "no", or the frames dropped before it and after
-         * ("after 412 frames: 96 dropped before, 14 of 2600 after").
+         * What lean ([LeanAudio]) did, for a call's numbers: "no"; "from the start: 14 of 5600 dropped" (lean within
+         * the channel's first frames); or, when the host learned its link during the call, the frames dropped before
+         * and after ("after 412 frames: 96 dropped before, 14 of 2600 after").
          */
-        fun lean(): String = if (leanFromIn < 0) "no" else
-            "after $leanFromIn frames: $leanFromDropped dropped before, ${dropped - leanFromDropped} of ${framesIn - leanFromIn} after"
+        fun lean(): String = when {
+            leanFromIn < 0 -> "no"
+            leanFromIn <= LEAN_AT_START -> "from the start: ${dropped - leanFromDropped} of ${framesIn - leanFromIn} dropped"
+            else -> "after $leanFromIn frames: $leanFromDropped dropped before, ${dropped - leanFromDropped} of ${framesIn - leanFromIn} after"
+        }
     }
 
     private val sessions = AtomicLong(); private val framesIn = AtomicLong(); private val framesOut = AtomicLong()
@@ -50,6 +54,8 @@ object CallAudioCheck {
     const val STALL_MS = 1000L
     /** A write this slow waited for the link (a frame comes every 10 ms): its time counts as blocked. */
     const val BLOCKED_MS = 40L
+    /** Lean within this many frames of a call's Bluetooth audio (half a second) is lean from the start. */
+    const val LEAN_AT_START = 50L
 
     /** A call's audio starts (CALL_START: the daemon's totals restart too). */
     fun begin(hotspot: String) {

@@ -36,7 +36,7 @@ internal fun LocalSocket.closeNow() {
  * One L2CAP server channel, its PSM published in the GATT AUDIO_PSM characteristic. The iPhone reads the
  * PSM and connects when it answers a call; on connect we open the daemon socket and run two pump threads.
  *
- * A link of small radio packets that stops keeping up goes lean for the rest of the channel ([LeanAudio]).
+ * On a host whose Bluetooth sends in small radio packets the channel is lean from its first frame ([LeanAudio]).
  */
 @SuppressLint("MissingPermission")
 class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLink) {
@@ -113,7 +113,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
         val qLock = ReentrantLock()
         val ready = qLock.newCondition()
         val st = IntArray(7)                         // frames in, frames out, writes, dropped, slowest write (ms), bytes out, ms blocked
-        // Lean ([LeanAudio]): only a link of small radio packets, only once it struggles, for the rest of this channel
+        // Lean ([LeanAudio]): only on a host whose link is one of small radio packets, from this channel's first frame
         val lean = AtomicBoolean(false)
         val leanAsked = AtomicBoolean(false)
         val goLean = { why: String ->
@@ -127,8 +127,7 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
             val din = ds.inputStream
             val buf = ByteArray(MAX)
             var stallLogged = 0L
-            val watch = LeanAudio.Watch(patient = RemoteLink.enabled)
-            var secondFrom = SystemClock.elapsedRealtime(); var secondDropped = 0
+            var leanLooked = 0L
             try {
                 while (alive.get()) {
                     val n = din.read(buf)
@@ -141,23 +140,19 @@ class AudioBridge(private val adapter: BluetoothAdapter, private val ble: BleLin
                     qLock.lock()
                     try {
                         q.addLast(framed); st[0]++; CallAudioCheck.frameIn()
-                        while (q.size > BACKLOG) { q.removeFirst(); st[3]++; secondDropped++; dropped = true; CallAudioCheck.dropped() }
+                        while (q.size > BACKLOG) { q.removeFirst(); st[3]++; dropped = true; CallAudioCheck.dropped() }
                         ready.signal()
                     } finally { qLock.unlock() }
+                    val now = SystemClock.elapsedRealtime()
+                    // Asked at the first frame (the daemon has this client by then: a cap asked for earlier could
+                    // meet the daemon before the client did, and a new client starts without one), then once a second:
+                    // the host may learn what its link is during a call
+                    if (!leanAsked.get() && now - leanLooked >= 1000) {
+                        leanLooked = now
+                        LeanAudio.why(LinkRadio.smallPackets)?.let { if (leanAsked.compareAndSet(false, true)) goLean(it) }
+                    }
                     // A write that never returns logs nothing itself: say so from here (a client got no caller audio
                     // for 15 s while its own audio still reached the host, 6 Nov 2026)
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - secondFrom >= 1000) {
-                        val troubled = watch.second(secondDropped)
-                        secondFrom = now; secondDropped = 0
-                        // (the daemon's frames are coming, so the call's audio is up: the cap would not outlive its start)
-                        val why = when {
-                            LeanAudio.always -> "lean from the start (debug)"
-                            troubled && LinkRadio.smallPackets -> "this link sends in small radio packets and isn't keeping up"
-                            else -> null
-                        }
-                        if (why != null && leanAsked.compareAndSet(false, true)) goLean(why)
-                    }
                     if (dropped && now - stallLogged > 5000) {
                         stallLogged = now
                         // With what the radios were doing: a stall's cause is one of them, and the line alone never said

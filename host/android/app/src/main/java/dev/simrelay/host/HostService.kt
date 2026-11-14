@@ -148,13 +148,12 @@ class HostService : Service() {
                 Log.i(TAG, "LINK_RADIO: in use ${LinkRadio.inUse}, log [${LinkRadio.history()}], scans [${l.scans}], hci [${l.hci}], link [${l.link}]")
             }.start()
             // adb debug (root only), until the app restarts: --ez small true treats this host's link as one of small
-            // radio packets (it then goes lean when it struggles); --ez always true makes every Bluetooth audio channel
-            // lean from its start, to hear what lean sounds like on any host. Without extras: what holds now.
+            // radio packets (its Bluetooth call audio is then lean); --ez always true makes every Bluetooth audio channel
+            // lean, to hear what lean sounds like on any host. Without extras: what holds now.
             "AUDIO_LEAN" -> {
                 if (intent.hasExtra("small")) LinkRadio.smallForced = intent.getBooleanExtra("small", false)
                 if (intent.hasExtra("always")) LeanAudio.always = intent.getBooleanExtra("always", false)
-                Log.i(TAG, "AUDIO_LEAN: small packets ${LinkRadio.smallText()}, lean from the start ${LeanAudio.always}, " +
-                    "internet first ${RemoteLink.enabled}")
+                Log.i(TAG, "AUDIO_LEAN: small packets ${LinkRadio.smallText()}, lean on every host ${LeanAudio.always}")
             }
             // adb debug (root only): push a made-up call or text to the iPhone whatever the link. --es kind call|sms
             "PUSH_TEST" -> Push.test(intent.getStringExtra("kind") ?: "sms")

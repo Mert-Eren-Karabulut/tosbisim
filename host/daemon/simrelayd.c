@@ -23,7 +23,7 @@
 //   HAS <control>  -> OK count=n [items=a|b|c] | ERR   (auto profiles: a control on this card, an enum's options)
 //   TUNE [p k per] -> OK prime= keep= period=   (jitter-buffer frames, inject PCM period; live)
 //   FRAME_MAX <n>  -> OK | ERR   (each 10 ms frame of the caller's audio at most n bytes, 0 = no cap; until the next
-//                                 audio client or call: for a Bluetooth link that carries very little per slot)
+//                                 audio client: for a Bluetooth link that carries very little per slot)
 //   AUDIO?         -> OK call= session= silence= cap= voiced= sent= played= peak= txdrop= noclient= recv= plc=
 //                     starved= live= capms= caperr=   (this call's totals: the call test, the app's end-of-call checks)
 //   Box mode (box.c): SCREEN_OFF | WAKE | POWERKEY 1|0 | ROLE <role> <pkg> | CHARGE <percent> | CHARGE? -> OK <node>|ERR

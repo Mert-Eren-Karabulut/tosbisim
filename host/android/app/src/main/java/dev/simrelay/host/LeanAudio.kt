@@ -11,13 +11,17 @@ package dev.simrelay.host
  * capped at [FRAME] bytes by the daemon (FRAME_MAX, about 15 kbit/s for 24, still wideband), two of them a write
  * ([WRITE] bytes), 50 writes a second.
  *
- * This is for that kind of link only, and only when it struggles:
- *  - the chip's record must have shown the small packets ([LinkRadio.smallPackets]). On every other host a link that
- *    stops taking audio means the phone is leaving Bluetooth range, and nothing here runs;
- *  - the internet goes first. A phone with Internet mode set up moves a fading call there by itself within seconds
- *    (its own rule, on what it hears); the host then waits [PATIENCE_S] of trouble before it goes lean, which is
- *    only reached when that move did not happen.
- * Lean lasts for that Bluetooth audio channel: the next call, and a call that moves to the internet, start normal.
+ * This is for that kind of link only: the chip's record must have shown the small packets ([LinkRadio.smallPackets]),
+ * and on every other host nothing here runs. On such a host a Bluetooth audio channel is lean from its first frame.
+ *
+ * It used to wait for the link to fall behind (frames dropped from the bridge's backlog). That sign comes far too
+ * late: Android's Bluetooth takes about 500 frames into its own queue before a write ever blocks, so the host saw
+ * nothing for the first 12 s of a call while the phone got 58 frames of 100 a second from the first one, and the
+ * queued audio then had to drain before lean helped: a call was choppy for 20 s and what followed arrived seconds
+ * late (14 Nov 2026). Nothing may pile up there, so nothing is waited for.
+ *
+ * Lean lasts for that Bluetooth audio channel: a call that moves to the internet starts normal (the phone's own rule
+ * still moves a fading call there, lean or not).
  */
 object LeanAudio {
     /** A frame's Opus bytes when lean. */
@@ -27,39 +31,18 @@ object LeanAudio {
     /** How long a write waits for its second frame (one comes every 10 ms; a hold must not keep a frame back). */
     const val PAIR_WAIT_MS = 15L
 
-    /** A second in which this many frames fell out of the bridge's backlog is a troubled one (50 ms of the caller gone). */
-    const val TROUBLED = 5
-    /** Trouble is two troubled seconds within this many. */
-    const val WINDOW_S = 6
-    /** With Internet mode set up: how long the trouble must have lasted, the phone's move to the internet coming first. */
-    const val PATIENCE_S = 5
-
     init {
         // Two radio packets hold one write: its L2CAP header (4 bytes) and length (2), then the frames
         check(WRITE + 6 <= 2 * HciRing.SMALLEST)
     }
 
-    /** adb debug (AUDIO_LEAN --ez always true): every Bluetooth audio channel goes lean from its start, on any host. */
+    /** adb debug (AUDIO_LEAN --ez always true): every Bluetooth audio channel is lean, on any host. */
     @Volatile var always = false
 
-    /**
-     * When a Bluetooth audio channel goes lean: fed once a second with the frames dropped in it, true once. [patient]:
-     * Internet mode is set up, so the phone's own move comes first. Pure (LeanAudioTest).
-     */
-    class Watch(private val patient: Boolean) {
-        private val recent = ArrayDeque<Boolean>()
-        private var second = 0
-        private var since = -1                       // the second this trouble began; -1 when the window is clear
-
-        fun second(dropped: Int): Boolean {
-            second++
-            val troubled = dropped >= TROUBLED
-            recent.addLast(troubled)
-            if (recent.size > WINDOW_S) recent.removeFirst()
-            if (recent.none { it }) since = -1
-            if (!troubled) return false
-            if (since < 0) since = second
-            return recent.count { it } >= 2 && (!patient || second - since >= PATIENCE_S)
-        }
+    /** Why a Bluetooth audio channel is lean, for the log; null: it is not. [small]: [LinkRadio.smallPackets]. Pure (LeanAudioTest). */
+    fun why(small: Boolean, always: Boolean = this.always): String? = when {
+        always -> "lean on every host (debug)"
+        small -> "this host's Bluetooth sends in small radio packets"
+        else -> null
     }
 }

@@ -211,7 +211,9 @@ static double g_st_jb_sum;
 static unsigned g_st_jb_n, g_st_reopen;
 // The most bytes one frame of the caller's audio may take (FRAME_MAX), 0 = no cap. For a Bluetooth link that carries
 // two 27-byte radio packets per connection slot and no more: two capped frames then fit one slot (a Galaxy A13 host,
-// 13 Nov 2026). Belongs to the audio client that asked: a new client and a new call start without it.
+// 13 Nov 2026). Belongs to the audio client that asked, whose link it is for: a new client starts without it. A
+// call's start leaves it alone (the host asks at the client's first frame: a second line's call on the same client
+// would have lost it).
 static volatile int g_frame_max;
 static volatile int g_stall_ms;          // debug: one playback stall (STALL command)   // playback frames written; max jitter depth   // max |sample| captured in the window: 0 = the caller path is silent
 
@@ -740,7 +742,6 @@ void audio_call_begin(const audio_cfg_t *cfg) {
     g_tot_txdrop = g_tot_noclient = g_tot_recv = g_tot_plc = g_tot_starved = g_tot_live = 0;
     g_tot_capms = g_tot_caperr = 0;
     g_tot_peak = 0;
-    g_frame_max = 0;
     if (g_call_running) audio_call_end();
     g_cfg = *cfg;
     jb_reset();
