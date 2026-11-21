@@ -79,6 +79,8 @@ class BleLink(
         val CTRL_RX: UUID = UUID.fromString("0e9c0003-0971-48af-ba0b-2c5c254faec0")
         val AUDIO_PSM: UUID = UUID.fromString("0e9c0004-0971-48af-ba0b-2c5c254faec0")
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        /** A service that only exists to change the table ([tellServicesChanged]); nothing reads it. */
+        val CHANGED: UUID = UUID.fromString("0e9c00fe-0971-48af-ba0b-2c5c254faec0")
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -91,6 +93,7 @@ class BleLink(
     private val queues = ConcurrentHashMap<String, ArrayDeque<ByteArray>>()
     private val inFlight = ConcurrentHashMap<String, Boolean>()
     private val notifyFails = ConcurrentHashMap<String, Int>()
+    private val up = ConcurrentHashMap<String, BluetoothDevice>()     // links Android told us came up and not yet that they ended
     @Volatile var audioPsm = 0
 
     /**
@@ -163,7 +166,12 @@ class BleLink(
             when (i.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {
                 android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF -> main.post {
                     Log.i(TAG, "Bluetooth turning off: GATT server down")
-                    runCatching { gatt?.close() }; gatt = null
+                    runCatching { gatt?.close() }; gatt = null; serviceHandle = 0
+                    // Every link ends with the radio, and with the server closed nobody tells us: the phone stayed
+                    // "served" here, so when it came back and nothing it sent arrived, the host never asked for a
+                    // Hello and took none of a silent link's steps (seen on the emulator rig, 21 Nov 2026)
+                    val ended = up.values.toList(); up.clear()
+                    ended.forEach { runCatching { onLink(it, false) } }
                     advSet = null; registered = false; starting = false; replacing = false; enableTries = 0; failures = 0; advDisabled = false   // the radio drops it
                     advStatus = null
                     readers.clear(); queues.clear(); inFlight.clear(); mtu.clear(); notifyFails.clear()
@@ -322,6 +330,7 @@ class BleLink(
     }
 
     private fun linkDown(d: BluetoothDevice) {
+        up.remove(d.address)
         resetStream(d.address)
         onLink(d, false)
         restartAdvertising()
@@ -330,19 +339,67 @@ class BleLink(
     /** Our GATT service is registered: notifications can reach clients from now on. */
     var onServiceReady: (() -> Unit)? = null
 
+    /** A phone's link came up (before it subscribes or says anything). */
+    var onConnected: ((BluetoothDevice) -> Unit)? = null
+
+    /**
+     * Where our service sits in the phone's table of Bluetooth services (its first attribute handle; 0: not added yet).
+     * Android gives a service the next free place each time it is added: after a Bluetooth restart or a restart of this
+     * app that can be another place than before, depending on which other apps registered theirs first. A phone that
+     * paired keeps a copy of the table and writes by place.
+     */
+    @Volatile var serviceHandle = 0
+        private set
+
+    /** [serviceHandle] when the paired phone last said Hello over Bluetooth (0: never): Relay keeps it. */
+    var handleAtHello: Int
+        get() = prefs.getInt("handle_at_hello", 0)
+        set(v) { if (v != handleAtHello) prefs.edit().putInt("handle_at_hello", v).apply() }
+
+    /**
+     * Tell every connected phone that our table of services changed, so it reads the table again instead of using its
+     * copy: Android sends Bluetooth's "Service Changed" to connected phones whenever a service is added or removed, so
+     * a service of no other use is added, or taken away if an earlier telling left it there. Ours keeps its place
+     * either way.
+     *
+     * For a paired phone whose link is up and silent: on 21 Nov 2026 an iPhone connected 26 min after its host's
+     * Bluetooth had restarted, subscribed and said Hello, and neither reached this app; the iPhone's log has "Writing is
+     * not permitted" for the Hello. This app refuses no write. What fits is that the iPhone wrote to places that were
+     * no longer ours, from a copy of the table made before the restart (not proven: no log had the places, which is
+     * why they are logged now). The same silence followed host updates and the host's own Bluetooth reset on a Redmi
+     * Note 9 Pro (11 and 12 Nov 2026). On the emulator rig a connected Android phone got the notice and read the
+     * table again (21 Nov 2026); what an iPhone does with it is only known from real pairs (link_recovered).
+     */
+    fun tellServicesChanged(): Boolean {
+        val g = gatt ?: return false
+        return runCatching {
+            val there = g.getService(CHANGED)
+            if (there != null) g.removeService(there)
+            else g.addService(BluetoothGattService(CHANGED, BluetoothGattService.SERVICE_TYPE_PRIMARY).apply {
+                addCharacteristic(BluetoothGattCharacteristic(CHANGED, BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ))
+            })
+        }.onFailure { Log.w(TAG, "telling phones the services changed failed: $it") }.getOrDefault(false)
+    }
+
     private val callback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
-            Log.i(TAG, "GATT service added status=$status")
+            if (service.uuid == CHANGED) return                           // [tellServicesChanged]: not ours to announce
+            if (status == BluetoothGatt.GATT_SUCCESS) serviceHandle = service.instanceId
+            val before = handleAtHello
+            Log.i(TAG, "GATT service added status=$status" + if (status != BluetoothGatt.GATT_SUCCESS) "" else
+                " at place ${service.instanceId}" + if (before != 0 && before != service.instanceId) " (the phone last said Hello with it at $before)" else "")
             if (status == BluetoothGatt.GATT_SUCCESS) main.post { onServiceReady?.invoke() }
         }
 
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "BLE connected ${device.address} bond=${device.bondState}")
+                up[device.address] = device
                 ignoredDown.remove(device.address)
                 resetStream(device.address)
                 LinkRadio.linkUp()
                 askPhy(device, "connected")
+                main.post { onConnected?.invoke(device) }
                 return
             }
             // A false DISCONNECTED comes from a short duplicate connection while the real link stays up (M1 spike)
