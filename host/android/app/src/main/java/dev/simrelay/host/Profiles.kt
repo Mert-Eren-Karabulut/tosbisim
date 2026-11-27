@@ -189,6 +189,23 @@ object VendorAudio {
             Regex("""<ctl name="(Incall_Music${if (two) "_2" else ""} Audio Mixer (MultiMedia\d+))" value="1"""").findAll(x).map { it.groupValues }.toList()
         }.filter { it[2] != "MultiMedia1" }.groupingBy { it[1] }.eachCount().maxByOrNull { it.value }?.key
     }
+
+    /**
+     * The in-call music route when the vendor's files name none: the sound card's own. A custom ROM's audio files can
+     * leave the path out while its kernel still has the control and the stream: a Mi 6 on LineageOS 22 (the only way
+     * that phone gets an Android this app runs on) stayed in Basic mode with no call test to try (27 Nov 2026), a
+     * Galaxy S5 on a custom Android 13 likewise.
+     *
+     * The front end the vendor lists a PCM for when it lists one ([pcmIds]), then MultiMedia2 (what Qualcomm's HAL
+     * uses when nothing says otherwise), then MultiMedia9 (the most named one in stock files); never MultiMedia1 (see
+     * [incallRoute]). It must have a playback stream by that name ([playback]: name to PCM) and the control ([has]).
+     * Pure (AutoProfileTest).
+     */
+    fun kernelRoute(pcmIds: List<Int>, has: (String) -> Boolean, playback: Map<String, Int>): String? {
+        val listed = pcmIds.singleOrNull()?.let { id -> playback.entries.firstOrNull { it.value == id }?.key }
+        return (listOfNotNull(listed) + listOf("MultiMedia2", "MultiMedia9")).distinct()
+            .filter { it != "MultiMedia1" && it in playback }.map { "Incall_Music Audio Mixer $it" }.firstOrNull(has)
+    }
 }
 
 object AutoProfile {
@@ -210,29 +227,44 @@ object AutoProfile {
             Log.i(TAG, "auto profile: $said")
             return@runCatching samsung
         }
-        val pcmIds = VendorAudio.incallMusicPcmIds(files)
-        val mixers = VendorAudio.mixers(files)
-        val inj1 = VendorAudio.incallRoute(mixers, false) ?: run { why = "no incall music control in the vendor paths"; Log.i(TAG, "auto profile: $why"); return null }
+        val (p, found) = qcom(Build.DEVICE, VendorAudio.mixers(files), VendorAudio.incallMusicPcmIds(files), has, AsoundPcm::byName, AsoundPcm::playbackByName)
+        why = found
+        Log.i(TAG, "auto profile${if (p != null) " built" else ""}: $found")
+        p
+    }.onFailure { Log.w(TAG, "auto profile: $it") }.getOrNull()
+
+    /**
+     * Qualcomm's legacy voice path: the profile, or null, and what to say about it. The in-call music route comes
+     * from the vendor's mixer paths, else from the sound card itself ([VendorAudio.kernelRoute]); either way the call
+     * test decides whether the phone gets call audio. [pcms]: every PCM by name, [playback]: those with a playback
+     * stream. Pure (AutoProfileTest).
+     */
+    fun qcom(device: String, mixers: List<String>, pcmIds: List<Int>, has: (String) -> Boolean,
+             pcms: () -> Map<String, Int>, playback: () -> Map<String, Int>): Pair<Profile?, String> {
+        val vendor = VendorAudio.incallRoute(mixers, false)
+        val inj1 = vendor ?: VendorAudio.kernelRoute(pcmIds, has, playback())
+            ?: return null to "no incall music control in the vendor paths, and none on the sound card with a playback stream"
         // The PCM: the platform-info id when the vendor lists one, else by name. The route names its front end
         // ("Incall_Music Audio Mixer MultiMedia9" -> PCM "MultiMedia9"): 9 of 29 legacy phones in the AndroidDumps
-        // corpus list no id (the HAL then uses its built-in default), 19 Oct.
+        // corpus list no id (the HAL then uses its built-in default), 19 Oct. A route from the card is always by name.
         val fe = Regex("""Audio Mixer (MultiMedia\d+)""").find(inj1)?.groupValues?.get(1)
-        val pcm = pcmIds.singleOrNull() ?: fe?.let { AsoundPcm.byName()[it] }
-            ?: run { why = "incall music PCM ids $pcmIds, front end $fe not found by name"; Log.i(TAG, "auto profile: $why"); return null }
-        val inj2 = VendorAudio.incallRoute(mixers, true) ?: inj1.replace("Incall_Music ", "Incall_Music_2 ")
+        val pcm = (if (vendor != null) pcmIds.singleOrNull() else null) ?: fe?.let { pcms()[it] }
+            ?: return null to "incall music PCM ids $pcmIds, front end $fe not found by name"
+        val inj2 = (if (vendor != null) VendorAudio.incallRoute(mixers, true) else null) ?: inj1.replace("Incall_Music ", "Incall_Music_2 ")
         val names = listOf("MultiMedia1 Mixer VOC_REC_DL", inj1, inj2, "Voice Tx Device Mute", "Voice Rx Device Mute")
         val missing = names.filterNot(has)
-        if (missing.isNotEmpty()) { why = "missing controls $missing"; Log.i(TAG, "auto profile: $why"); return null }
+        if (missing.isNotEmpty()) return null to "missing controls $missing"
         // The record channel count (1 = mono, 2 = DL+UL): only newer msm-pcm-voice kernels have it; older ones
         // (msm8953, sdm660, msm8996, sdm710: 14 of 34 sampled kernels, tools/corpus/out/kernels.md) always record mono.
         val recConfig = "Voc Rec Config".takeIf(has).orEmpty()
-        val json = JSONObject("""{"id":"auto/${Build.DEVICE}","router":"qcom-legacy","card":0,
+        val json = JSONObject("""{"id":"auto/$device","router":"qcom-legacy","card":0,
             "capture":{"pcm":0,"route":"MultiMedia1 Mixer VOC_REC_DL","rec_config":"$recConfig","rate":16000,"channels":1},
             "inject":{"pcm":$pcm,"rate":48000,"channels":2,"route_by_session":{"1":${JSONObject.quote(inj1)},"2":${JSONObject.quote(inj2)}}},
             "mute":{"tx":"Voice Tx Device Mute","rx":"Voice Rx Device Mute","vsid":4294967295,"ramp_ms":20}}""")
-        Log.i(TAG, "auto profile built: inject PCM $pcm, routes '$inj1' / '$inj2'")
-        Profile(json.getString("id"), json, "auto")
-    }.onFailure { Log.w(TAG, "auto profile: $it") }.getOrNull()
+        if (vendor == null) json.put("route_from", "sound card")      // for the report: the vendor's files named none
+        return Profile(json.getString("id"), json, "auto") to
+            "inject PCM $pcm, routes '$inj1' / '$inj2'" + if (vendor == null) " (from the sound card: the vendor paths name none)" else ""
+    }
 }
 
 /**

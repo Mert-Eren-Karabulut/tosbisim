@@ -1,0 +1,19 @@
+1	Voice Rx Device Mute	int	3	0..-1
+2	Voice Tx Device Mute	int	3	0..-1
+3	Voice Tx Mute	int	3	0..-1
+1441	MultiMedia1 Mixer VOC_REC_DL	bool	2	
+1442	MultiMedia1 Mixer VOC_REC_UL	bool	2	
+1565	MultiMedia4 Mixer VOC_REC_DL	bool	2	
+1566	MultiMedia4 Mixer VOC_REC_UL	bool	2	
+1662	MultiMedia8 Mixer VOC_REC_DL	bool	2	
+1663	MultiMedia8 Mixer VOC_REC_UL	bool	2	
+1683	MultiMedia9 Mixer VOC_REC_DL	bool	2	
+1684	MultiMedia9 Mixer VOC_REC_UL	bool	2	
+1940	Incall_Music Audio Mixer MultiMedia1	bool	2	
+1941	Incall_Music Audio Mixer MultiMedia2	bool	2	
+1942	Incall_Music Audio Mixer MultiMedia5	bool	2	
+1943	Incall_Music Audio Mixer MultiMedia9	bool	2	
+1944	Incall_Music_2 Audio Mixer MultiMedia1	bool	2	
+1945	Incall_Music_2 Audio Mixer MultiMedia2	bool	2	
+1946	Incall_Music_2 Audio Mixer MultiMedia5	bool	2	
+1947	Incall_Music_2 Audio Mixer MultiMedia9	bool	2	

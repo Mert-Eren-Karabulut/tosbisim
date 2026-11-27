@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.39",
+    "code": 75,
+    "en": "A phone whose own audio files don't name the route for call audio stayed in Basic mode with no call test to try, even when its sound card has that route. This happens on custom ROMs: a Mi 6 on LineageOS 22 and a Galaxy S5 on a custom Android 13 were left like that. In that case the host now takes the route from the sound card itself, and the Host tab on your phone offers the call test.\nThe call test still decides: only a phone that passes it gets calls. One that doesn't stays in Basic mode, as before. Phones that already had call audio or a call test are not affected.",
+    "tr": "Kendi ses dosyalarında arama sesinin yolu tanımlı olmayan telefonlar, ses kartlarında bu yol bulunsa bile Temel modda kalıyor ve arama testi hiç çıkmıyordu. Bu durum özel ROM'larda görülüyor: LineageOS 22 yüklü bir Mi 6 ve özel Android 13 yüklü bir Galaxy S5 böyle kalmıştı. Ana cihaz artık bu durumda yolu doğrudan ses kartından alıyor ve telefonunuzdaki Ana Cihaz sekmesinde arama testi çıkıyor.\nKarar yine arama testinde: yalnızca testi geçen telefona aramalar aktarılır. Geçemeyen, eskisi gibi Temel modda kalır. Arama sesi ya da arama testi zaten olan telefonlarda hiçbir şey değişmedi."
+  },
+  {
     "version": "0.12.38",
     "code": 74,
     "en": "When the phone's Bluetooth link was up but nothing the phone sent reached the host (the phone showed \"connecting\" and worked only over the internet), the host now first tells the phone that its Bluetooth services changed, so the phone reads them again instead of using its saved copy. A phone keeps such a copy of a paired host, and after the host's Bluetooth or the host app restarted, the copy can point to the wrong place. Nothing is disconnected for this. Only if no Hello follows does the host drop the link and then restart Bluetooth, as before.\nThe host now does this 5 seconds after a link comes up silent, not up to a minute later, and for every silent link. Before, the drop and the Bluetooth restart ran only once after the host app started: a later silent link got no help, and one iPhone stayed off Bluetooth for ten minutes.\nThe host no longer drops the link or restarts Bluetooth while the phone is pairing with it again.",
