@@ -51,6 +51,18 @@ object HciRing {
         return emptyList<Rec>() to ""
     }
 
+    /** A record file's first 16 bytes: what [read] expects before a record taken from elsewhere (a dump's text). */
+    val FILE_HEAD: ByteArray get() = "btsnoop".toByteArray(Charsets.US_ASCII) + byteArrayOf(0, 0, 0, 0, 1, 0, 0, 0x03, 0xea.toByte())
+
+    /** Microseconds from the year 0 (a record file's clock) to 1970. */
+    const val EPOCH_US = 0x00dcddb30f2f8000L
+
+    /**
+     * When the last entry of a record taken from a dump's text was made (ms since 1970): its nine-byte lead holds
+     * that, the entries themselves only the time between them. 0 when [blob] is too short.
+     */
+    fun dumpEndMs(blob: ByteArray): Long = if (blob.size < 9) 0 else le64(blob, 1)
+
     /** A record's time is microseconds since the year 0: its top two bytes are these from 2024 to 2042. */
     private fun timely(t: Long) = (t ushr 48) == 0xe3L || (t ushr 48) == 0xe4L
 

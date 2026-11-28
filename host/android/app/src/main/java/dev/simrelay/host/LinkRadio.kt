@@ -196,6 +196,39 @@ object LinkRadio {
     }.getOrElse { Look("", null, "failed: ${it.javaClass.simpleName}", "") }
 
     /**
+     * The record of the chip's traffic alone, with how it was found, or no records and why. For a pairing that went
+     * nowhere ([PairWatch]), never in a call. Where the Bluetooth dump writes no file, the record is in the dump's own
+     * text (Android 12 and older, and makers who kept that: a Xiaomi on Android 13 has no file either, 28 Nov 2026):
+     * the same entries [HciRing] reads from a Galaxy A13's file, compressed, behind a nine-byte lead. Never throws.
+     */
+    fun record(): Record = runCatching {
+        // A file the dump did not just write is another time's record: then the dump's own text, if it has one
+        val r = Root.sh("d=\$(dumpsys bluetooth_manager 2>/dev/null); f=\$(ls -t $RINGS 2>/dev/null | head -1); a=999999; " +
+            "[ -n \"\$f\" ] && a=\$(( \$(date +%s) - \$(stat -c %Y \$f) )); " +
+            "if [ \$a -le 60 ]; then echo file \$a; base64 \$f | head -c 8000000; " +
+            "else echo dump; echo \"\$d\" | sed -n '/BEGIN:BTSNOOP_LOG_SUMMARY/,/END:BTSNOOP_LOG_SUMMARY/p' | head -c 3000000; fi", 12_000)
+        val first = r.out.substringBefore('\n')
+        val body = r.out.substringAfter('\n', "")
+        val b64 = (if (first == "dump") body.lines().filterNot { it.startsWith("---") }.joinToString("") else body)
+            .filterNot { it.isWhitespace() }.removeSuffix("timeout")
+        if (first != "dump" && !first.startsWith("file ")) return@runCatching Record(emptyList(), "no answer")
+        if (b64.length < 16) return@runCatching Record(emptyList(), if (first == "dump") "no record file, none in the dump" else "empty record file")
+        val bytes = java.util.Base64.getDecoder().decode(b64.take(b64.length - b64.length % 4))
+        val (recs, how) = HciRing.read(if (first == "dump") HciRing.FILE_HEAD + bytes else bytes)
+        val age = first.removePrefix("file ").trim().toLongOrNull() ?: 0
+        val where = (if (first == "dump") "from the dump" else "from the file") + (if (how.isEmpty()) "" else ", $how") + (if (age > 5) ", written $age s ago" else "")
+        if (recs.isEmpty()) return@runCatching Record(emptyList(), "record not readable (${HciRing.probe(if (first == "dump") HciRing.FILE_HEAD + bytes else bytes)}, $where)")
+        // When the last entry was made: a file's entries carry the time, a dump's text says it once in its lead
+        val endMs = if (first == "dump") HciRing.dumpEndMs(bytes) else if (how.startsWith("old layout")) 0 else (recs.last().t - HciRing.EPOCH_US) / 1000
+        val ago = (System.currentTimeMillis() - endMs) / 1000.0
+        val known = endMs > 0 && ago > -5 && ago < 86_400
+        Record(recs, "${HciRing.size(recs)}, $where" + if (known) "" else ", times count back from the record's last entry", if (known) maxOf(0.0, ago) else 0.0)
+    }.getOrElse { Record(emptyList(), "failed: ${it.javaClass.simpleName}") }
+
+    /** [record]'s answer: the records, how they were found (or why there are none), and how long ago the last one was made (0 = not known). */
+    class Record(val recs: List<HciRing.Rec>, val how: String, val endAgo: Double = 0.0)
+
+    /**
      * What a link agreed on (packet length, interval), while the record still holds it: a call's audio pushes that out
      * within seconds. Once per link, 20 s after the phone's Hello, on MediaTek hosts only: theirs is the sending that
      * needs explaining, and a look is a dump inside the Bluetooth stack. 0.12.32 looked on every full-voice host 6 s

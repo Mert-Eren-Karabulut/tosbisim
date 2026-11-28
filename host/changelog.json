@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.40",
+    "code": 76,
+    "en": "A pairing that the host accepts but that never completes now reports itself. On a Poco X3 NFC with MIUI 14 the host accepted a Galaxy S25 Ultra's pairing every time and the phone still stayed at \"connecting\": its first message never reached the host, and neither app's log said what the phone's Bluetooth did.\nWhen the host has accepted a pairing and the phone has not said hello within 30 seconds, the host now sends an automatic report with the steps of that pairing as Android told them and with its Bluetooth chip's own record of those seconds: which side started what, whether a pairing failed and why, and which requests got no answer. A report sent by hand from the pairing screen carries the same. The report holds no Bluetooth address, no key and nothing that was written or read.",
+    "tr": "Ana cihazın kabul ettiği ama tamamlanmayan bir eşleştirme artık kendini bildiriyor. MIUI 14 yüklü bir Poco X3 NFC, bir Galaxy S25 Ultra'nın eşleştirmesini her seferinde kabul etti ama telefon yine de \"bağlanıyor\"da kaldı: telefonun ilk mesajı ana cihaza hiç ulaşmadı ve iki uygulamanın kayıtları da telefonun Bluetooth'unun ne yaptığını söylemiyordu.\nAna cihaz bir eşleştirmeyi kabul ettikten sonra telefon 30 saniye içinde merhaba demezse, ana cihaz artık otomatik bir rapor gönderiyor: Android'in bildirdiği eşleştirme adımları ve Bluetooth çipinin o saniyelere ait kendi kaydı (hangi taraf neyi başlattı, eşleştirme başarısız olduysa neden, hangi istekler yanıtsız kaldı). Eşleştirme ekranından elle gönderilen rapor da aynısını taşıyor. Raporda Bluetooth adresi, anahtar ya da yazılan ve okunan içerik bulunmuyor."
+  },
+  {
     "version": "0.12.39",
     "code": 75,
     "en": "A phone whose own audio files don't name the route for call audio stayed in Basic mode with no call test to try, even when its sound card has that route. This happens on custom ROMs: a Mi 6 on LineageOS 22 and a Galaxy S5 on a custom Android 13 were left like that. In that case the host now takes the route from the sound card itself, and the Host tab on your phone offers the call test.\nThe call test still decides: only a phone that passes it gets calls. One that doesn't stays in Basic mode, as before. Phones that already had call audio or a call test are not affected.",

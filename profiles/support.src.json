@@ -1,7 +1,7 @@
 {
   "comment": "TosbiSim support table, hand-written part. tools/corpus/gen_support.py merges it with the AndroidDumps corpus into profiles/support.json (do not edit that one). Tiers: verified = measured by us; expected = its own firmware shows our auto profile builds (same family as a verified phone), or every Android 11+ phone with its chip does, or its family's route is built from the kernel's own controls and passed a call test on a phone of that family; experimental = our family, but its files need a hand-made profile, or its chip's phones aren't all known to build; not_yet = an audio family we can't drive yet (Basic mode: SMS, call control, hotspot); unsupported = rules below (can't be rooted). Full voice still needs the in-app call test on every phone.",
   "version": 5,
-  "updated": "2026-11-10",
+  "updated": "2026-11-28",
   "phones": [
     {
       "name": "Galaxy S20 FE",
@@ -764,6 +764,23 @@
       "note": "Huawei doesn't unlock bootloaders, so this phone can't be rooted to become a host (it also launched on Android 10 without Google services).",
       "note_tr": "Huawei önyükleyici kilidini açmıyor, bu yüzden bu telefon ana cihaz olmak için root'lanamaz (ayrıca Google servisleri olmadan Android 10 ile çıktı).",
       "source": "spec: https://m.gsmarena.com/huawei_p_smart_2021-10475.php"
+    },
+    {
+      "name": "Nokia 3.2",
+      "brand": "Nokia",
+      "models": [
+        "Nokia 3.2"
+      ],
+      "devices": [
+        "DPL_sprout"
+      ],
+      "soc": "Snapdragon 429",
+      "tier": "expected",
+      "profile": null,
+      "family": "qcom-legacy",
+      "note": "A user's rooted Nokia 3.2 on stock Android 11 passed the call test on 27 Nov 2026. Put the SIM in the first slot: with the SIM in the second slot the other side can't hear you yet. HMD has no official bootloader unlock: on this model it worked with the usual fastboot commands on some firmware versions, and may not on every one.",
+      "note_tr": "Bir kullanıcının root'lu, stok Android 11 yüklü Nokia 3.2'si 27 Kasım 2026'da arama testini geçti. SIM kartı birinci yuvaya takın: SIM ikinci yuvadayken karşı taraf sizi henüz duyamıyor. HMD'nin resmi bir önyükleyici kilit açma yolu yok: bu modelde bazı yazılım sürümlerinde alışılmış fastboot komutlarıyla açılabildi, her sürümde açılmayabilir.",
+      "source": "call test 27 Nov 2026; unlock: https://www.xda-developers.com/hmd-global-nokia-4-3-2-bootloader-unlocked-without-disassembly-android-10/"
     }
   ],
   "rules": [
@@ -811,9 +828,12 @@
         "hmd",
         "nokia"
       ],
+      "except_models": [
+        "Nokia 3.2"
+      ],
       "tier": "unsupported",
-      "reason": "HMD (Nokia) phones don't allow bootloader unlocking.",
-      "reason_tr": "HMD (Nokia) telefonlar önyükleyici kilidinin açılmasına izin vermez.",
+      "reason": "HMD (Nokia) phones don't allow bootloader unlocking. The Nokia 3.2 is an exception.",
+      "reason_tr": "HMD (Nokia) telefonlar önyükleyici kilidinin açılmasına izin vermez. Nokia 3.2 bir istisnadır.",
       "source": "https://nokiamob.net/2019/11/02/official-nokia-mobile-will-remove-the-option-to-unlock-the-nokia-7-2-and-nokia-6-2-bootloader/"
     },
     {

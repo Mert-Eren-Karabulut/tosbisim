@@ -150,11 +150,14 @@ object Relay {
                 val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
                 val mac = dev.address
                 val known = pinned() != null && mac == app.getSharedPreferences("relay", Context.MODE_PRIVATE).getString("client_mac", null)
+                PairWatch.request(i, dev, pairable() || known)
                 if (!pairable() && !known) return
                 if (known && !pairable()) Log.i(TAG, "pairing request from the paired phone (its keys were reset): accepting")
-                pairExec.execute { RootBt.confirm(app, mac) }
+                pairExec.execute { PairWatch.confirmed(mac, RootBt.confirm(app, mac)) }
             }
         }, android.content.IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST).apply { priority = 1000 })
+        PairWatch.place = { if (::ble.isInitialized) ble.serviceHandle else 0 }
+        PairWatch.start(app)
         Sims.protectNewSims(app)
         Sims.volteOn(app)
         Sims.log(app)
@@ -292,7 +295,7 @@ object Relay {
                     replay(Peer.Internet)
                 }
             }
-        } else Log.i(TAG, "client ${d.address} subscribed; waiting for Hello")
+        } else { PairWatch.subscribed(d.address); Log.i(TAG, "client ${d.address} subscribed; waiting for Hello") }
     }
 
     /** BLE frames arrive on binder threads: handle them on main, and never let one take the process down. */
@@ -456,6 +459,7 @@ object Relay {
         trusted.add(d.id)
         if (d is Peer.Ble) {
             noHelloSince = 0
+            PairWatch.hello(d.id)
             saidHello(d.id)
             // What the link agreed on (LinkRadio): well after the Hello, when the link serves and nothing is being set up
             main.postDelayed({ if (d.id in trusted) LinkRadio.linkLook() }, 20_000)

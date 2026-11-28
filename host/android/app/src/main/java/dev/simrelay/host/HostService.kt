@@ -155,6 +155,8 @@ class HostService : Service() {
                 if (intent.hasExtra("always")) LeanAudio.always = intent.getBooleanExtra("always", false)
                 Log.i(TAG, "AUDIO_LEAN: small packets ${LinkRadio.smallText()}, lean on every host ${LeanAudio.always}")
             }
+            // adb debug: what a pairing that brought no Hello would report now (its steps, the chip's record), into the log
+            "PAIR_LOOK" -> PairWatch.debug()
             // adb debug (root only): push a made-up call or text to the iPhone whatever the link. --es kind call|sms
             "PUSH_TEST" -> Push.test(intent.getStringExtra("kind") ?: "sms")
             // Debug (root only: this service is not exported): relay a synthetic SMS through the normal path.

@@ -394,6 +394,7 @@ class BleLink(
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "BLE connected ${device.address} bond=${device.bondState}")
+                PairWatch.note(device.address, "control link up, bond ${PairWatch.bondName(device.bondState)}")
                 up[device.address] = device
                 ignoredDown.remove(device.address)
                 resetStream(device.address)
@@ -405,6 +406,7 @@ class BleLink(
             // A false DISCONNECTED comes from a short duplicate connection while the real link stays up (M1 spike)
             val stillUp = bt.getConnectedDevices(BluetoothProfile.GATT).any { it.address == device.address }
             Log.i(TAG, "BLE disconnected ${device.address} status=$status (stack says ${if (stillUp) "STILL UP, ignored" else "down"})")
+            PairWatch.note(device.address, "control link down (status $status${if (stillUp) ", Android says the phone is still connected" else ""})")
             if (stillUp) { ignoredDown.add(device.address); return }
             ignoredDown.remove(device.address)
             linkDown(device)

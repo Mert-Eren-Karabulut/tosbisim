@@ -184,6 +184,8 @@ object Diag {
             try {
                 if (emulator && !prefs().getBoolean("emulator_ok", false)) { report = Report.REFUSED; return@execute }
                 val now = System.currentTimeMillis()
+                // A pairing that went nowhere in the last minutes: its steps and the chip's record ([PairWatch])
+                runCatching { if (Relay.started()) PairWatch.forReport(Relay.clientConnected())?.let { detail.put("pairing", it) } }
                 val body = facts("event").put("payload", JSONObject()
                     .put("event", "user_report").put("detail", detail)
                     .put("android", Build.VERSION.RELEASE).put("root", Compat.rootKind(app).id).put("log", recentLog(LOG_BYTES)))
