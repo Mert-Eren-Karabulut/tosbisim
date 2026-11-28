@@ -38,15 +38,15 @@ object HciRing {
      * later or with their numbers the other way round, or the whole record compressed, in either layout. When nothing
      * fits, [probe] says what the bytes look like.
      */
-    fun read(file: ByteArray): Pair<List<Rec>, String> {
+    fun read(file: ByteArray, oldUs: Boolean = false): Pair<List<Rec>, String> {
         if (file.size < 16 || String(file, 0, 7, Charsets.US_ASCII) != "btsnoop" || be32(file, 12) != 1002L) return emptyList<Rec>() to ""
         chain(file, 16, false).let { if (it.isNotEmpty()) return it to "" }
-        old(file, 16)?.let { return it }
+        old(file, 16, us = oldUs)?.let { return it }
         resync(file, 16)?.let { return it }
         for ((at, plain) in inflated(file)) {
             chain(plain, 0, false).let { if (it.size >= 8) return it to "compressed from $at" }
             resync(plain, 0)?.let { return it.first to "compressed from $at, ${it.second}" }
-            old(plain, 0)?.let { return it.first to "compressed from $at, ${it.second}" }
+            old(plain, 0, us = oldUs)?.let { return it.first to "compressed from $at, ${it.second}" }
         }
         return emptyList<Rec>() to ""
     }
@@ -61,7 +61,10 @@ object HciRing {
      * When the last entry of a record taken from a dump's text was made (ms since 1970): its nine-byte lead holds
      * that, the entries themselves only the time between them. 0 when [blob] is too short.
      */
-    fun dumpEndMs(blob: ByteArray): Long = if (blob.size < 9) 0 else le64(blob, 1)
+    fun dumpEndMs(blob: ByteArray): Long = if (blob.size < 9) 0 else le64(blob, 1).let { if (dumpInUs(blob)) it / 1000 else it }
+
+    /** Whether a dump's record counts in microseconds: its lead's time is then one (a 16-digit number in this century). */
+    fun dumpInUs(blob: ByteArray): Boolean = blob.size >= 9 && le64(blob, 1) > 100_000_000_000_000L
 
     /** A record's time is microseconds since the year 0: its top two bytes are these from 2024 to 2042. */
     private fun timely(t: Long) = (t ushr 48) == 0xe3L || (t ushr 48) == 0xe4L
@@ -124,9 +127,12 @@ object HciRing {
      * since the packet before, and a kind (0x10 event, 0x11 data in, 0x20 command, 0x21 data out), all little-endian,
      * then the bytes kept. Read from [from] as far as the entries hold, in the version that gets further; nothing under
      * [least] entries (anything can look like a few). Says where it stopped when that isn't the end, with the two lengths and the kind found there (three
-     * numbers, no content). The entries carry no date: times count from one second.
+     * numbers, no content). The entries carry no date: times count from one second. [us]: the time between entries
+     * is in microseconds, not milliseconds. Android's own dump writes it so (its lead then holds microseconds too,
+     * [dumpInUs]), whatever the field is called: a Poco X3 NFC's 84 seconds read as 23 hours, and the last two minutes
+     * of that held nothing (28 Nov 2026). A Galaxy A13's file has milliseconds.
      */
-    private fun old(b: ByteArray, from: Int, least: Int = 8): Pair<List<Rec>, String>? {
+    private fun old(b: ByteArray, from: Int, least: Int = 8, us: Boolean = false): Pair<List<Rec>, String>? {
         var best: Triple<List<Rec>, Int, Int>? = null                       // records, where they end, version
         for (version in intArrayOf(2, 1)) {
             val head = if (version == 2) 9 else 7
@@ -138,7 +144,7 @@ object HciRing {
                 val type = b[o + head - 1].toInt() and 0xff
                 val kind = OLD_KINDS[type]
                 if (len < 1 || kind == null || o + head + len - 1 > b.size) break
-                t += le32(b, o + head - 5) * 1000
+                t += le32(b, o + head - 5) * (if (us) 1 else 1000)
                 out += Rec(t, type < 0x20, kind, orig, b.copyOfRange(o + head, o + head + len - 1))
                 o += head + len - 1
             }

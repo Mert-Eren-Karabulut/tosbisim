@@ -119,7 +119,7 @@ class HciPairingTest {
 
     @Test fun enhancedChannelsAndOtherTraffic() {
         val r = Rec().up(0.0, H).data(100.0, true, H, 5, 0x17, 1, 8, 0, 0x27, 0).data(110.0, false, H, 5, 0x18, 1)
-            .data(200.0, true, H, 0x41, 2, 0, 0x12).data(210.0, false, H, 0x40, 1, 0, 0x13).data(220.0, true, H, 0x41, 2, 0, 0x12)
+            .data(200.0, true, H, 0x41, 7, 7, 7).data(210.0, false, H, 0x40, 7, 7, 7).data(220.0, true, H, 0x41, 7, 7, 7)
         val l = HciPairing.lines(r.list)
         assertTrue(l.joinToString("\n"), l.any { it.endsWith("link 1: phone opens enhanced channels (PSM 0x27: enhanced control channels)") })
         assertTrue(l.last(), l.last().endsWith("link 1: 2 packets in and 1 out on data channels so far"))
@@ -193,5 +193,74 @@ class HciPairingTimeTest {
         // A dump's lead: version, then the last entry's time in ms, lowest byte first
         assertEquals(0x0102L, HciRing.dumpEndMs(byteArrayOf(2, 2, 1, 0, 0, 0, 0, 0, 0, 9, 9)))
         assertEquals(0L, HciRing.dumpEndMs(byteArrayOf(2, 2)))
+    }
+}
+
+class HciPairingSecondRoundTest {
+    private fun le(v: Int) = intArrayOf(v and 0xff, v shr 8 and 0xff)
+    private fun data(ms: Double, fromPhone: Boolean, link: Int, cid: Int, vararg payload: Int): HciRing.Rec {
+        val whole = le(link or ((if (fromPhone) 2 else 0) shl 12)) + le(payload.size + 4) + le(payload.size) + le(cid) + payload
+        val d = whole.copyOf(minOf(14, whole.size))
+        return HciRing.Rec((ms * 1000).toLong() + 1_000_000, fromPhone, 2, whole.size, ByteArray(d.size) { d[it].toByte() })
+    }
+
+    @Test fun aDumpThatCountsInMicroseconds() {
+        // Android's own dump: the lead's time and the time between entries are microseconds
+        val body = java.io.ByteArrayOutputStream()
+        fun put(v: Long, n: Int) { for (i in 0 until n) body.write((v shr (8 * i)).toInt() and 0xff) }
+        fun packet(deltaUs: Long, kind: Int, real: Int, vararg d: Int) { put(d.size + 1L, 2); put(real.toLong(), 2); put(deltaUs, 4); body.write(kind); d.forEach { body.write(it) } }
+        for (i in 0 until 20) {
+            packet(1_000_000, 0x11, 15, 0x41, 0x20, 11, 0, 7, 0, 4, 0, 0x12, 45, 0, 1, 2, 3)   // a write request to 45, a second after the last entry
+            packet(2_000, 0x21, 9, 0x41, 0x00, 5, 0, 1, 0, 4, 0, 0x13)                          // its answer 2 ms later
+        }
+        val packed = java.io.ByteArrayOutputStream().also { o -> java.util.zip.DeflaterOutputStream(o).use { it.write(body.toByteArray()) } }.toByteArray()
+        val endUs = 1_795_000_000_000_000L
+        val blob = byteArrayOf(2) + ByteArray(8) { (endUs shr (8 * it)).toByte() } + packed
+        assertTrue(HciRing.dumpInUs(blob))
+        assertEquals(endUs / 1000, HciRing.dumpEndMs(blob))
+        val recs = HciRing.read(HciRing.FILE_HEAD + blob, oldUs = HciRing.dumpInUs(blob)).first
+        assertEquals(19.04, (recs.last().t - recs.first().t) / 1e6, 0.01)
+        // Read as milliseconds the same nineteen seconds were more than five hours
+        assertEquals(19_040.0, HciRing.read(HciRing.FILE_HEAD + blob).first.let { (it.last().t - it.first().t) / 1e6 }, 1.0)
+        assertTrue(HciPairing.lines(recs).single().endsWith("link 0x41: phone writes to 45: answered (x20)"))
+        // A lead in milliseconds stays what it was
+        val ms = byteArrayOf(2) + ByteArray(8) { (1_795_000_000_000L shr (8 * it)).toByte() } + packed
+        assertFalse(HciRing.dumpInUs(ms)); assertEquals(1_795_000_000_000L, HciRing.dumpEndMs(ms))
+    }
+
+    @Test fun requestsOnEnhancedChannels() {
+        val h = 0x41
+        val recs = listOf(
+            data(0.0, true, h, 5, 0x17, 1, 8, 0, 0x27, 0),                    // the phone opens enhanced channels
+            data(10.0, false, h, 5, 0x18, 1),
+            data(100.0, true, h, 0x40, 3, 0, 0x0a, 7, 0),                     // length 3, then: read 7
+            data(110.0, false, h, 0x52, 4, 0, 0x0b, 1, 2, 3),                 // its answer (the phone's channel has another number)
+            data(200.0, true, h, 0x41, 5, 0, 0x12, 45, 0, 9, 9),              // a write to 45 ...
+            data(5200.0, true, h, 0x70, 0x33, 0x44, 1, 2, 3, 4, 5, 6, 7, 8, 9), // audio-like: its first two bytes aren't its length
+            data(9000.0, true, h, 4, 0x02, 0x05, 0x02), data(9010.0, false, h, 4, 0x03, 0x05, 0x02))
+        val l = HciPairing.lines(recs)
+        val all = l.joinToString("\n")
+        assertTrue(all, l.any { it.endsWith("link 0x41 (enhanced channel): phone reads 7: answered") })
+        assertTrue(all, l.any { it.endsWith("link 0x41 (enhanced channel): phone writes to 45: NO ANSWER in the 8.8 s the record goes on") })
+        assertTrue(all, l.any { it.endsWith("link 0x41: phone asks for the packet size: answered") })
+        assertTrue(all, l.last().endsWith("link 0x41: 1 packets in and 0 out on data channels so far"))
+    }
+
+    @Test fun theBluetoothLogKeepsThePairingNotTheScanBookkeeping() {
+        val day = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.ROOT)
+        fun at(s: String) = day.parse("2026-11-28 $s")!!.time
+        val log = buildString {
+            appendLine("11-28 16:33:48.400 I/bt_btif_dm( 2222): bond_state_changed: state=2, prev_state=1")
+            appendLine("11-28 16:33:48.500 V/bt_stack( 2222): [VERBOSE1:gatt_utils.cc(1544)] found p_reg tcb_idx=0 gatt_if=1  conn_id=0x1")
+            appendLine("11-28 16:33:48.600 E/bt_stack( 2222): [ERROR:gatt_api.cc(570)] conn_id=0x0008 waiting for other op_code")
+            repeat(400) { appendLine("11-28 16:34:20.4%02d D/BtGatt.ScanManager( 2222): callback done for scannerId - 5 status - 0".format(it % 100)) }
+            repeat(300) { appendLine("11-28 16:34:21.%03d W/bt_l2cap( 2222): something late $it".format(it)) }
+        }
+        val l = PairWatch.stackLog(log, at("16:33:00.000"), at("16:35:00.000"))
+        assertEquals(201, l.size)
+        assertEquals("16:33:48.400 I bt_btif_dm: bond_state_changed: state=2, prev_state=1", l[0])
+        assertEquals("16:33:48.600 E bt_stack: [ERROR:gatt_api.cc(570)] conn_id=0x0008 waiting for other op_code", l[1])
+        assertEquals("... 102 lines left out", l[140])
+        assertTrue(l.none { "ScanManager" in it || "found p_reg" in it })
     }
 }

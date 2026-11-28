@@ -40,6 +40,7 @@ object PairWatch {
     @Volatile private var subscribedAt = 0L
     @Volatile private var lastMac: String? = null
     private var waits = 0
+    @Volatile private var lastSent = 0L
 
     /** For the event and a report: whether Bluetooth serves a client now, and where our service sits in the table. */
     @Volatile var place: () -> Int = { 0 }
@@ -143,7 +144,12 @@ object PairWatch {
             val detail = JSONObject().put("what", if (subscribed) "subscribed" else "not subscribed").put("seconds", seconds)
                 .put("bond", bondName(bond)).put("still_pairing", bond == BluetoothDevice.BOND_BONDING)
             fill(detail)
-            Diag.event("pairing_no_hello", detail)
+            // Every failed pairing counts, not one in six hours: the first report from a phone came without the chip's
+            // record, and the owner's next tries would have sent nothing (28 Nov 2026). At most one in ten minutes.
+            val now = SystemClock.elapsedRealtime()
+            if (lastSent != 0L && now - lastSent < 10 * 60_000L) return@Thread
+            lastSent = now
+            Diag.event("pairing_no_hello", detail, force = true)
         }.apply { isDaemon = true; name = "pair-watch" }.start()
     }
 
@@ -156,33 +162,40 @@ object PairWatch {
         val r = LinkRadio.record()
         detail.put("hci_note", r.how).put("hci", JSONArray(HciPairing.lines(r.recs, endAgo = r.endAgo)))
         detail.put("bt_log", JSONArray(stackLog(Root.sh("p=\$(pidof com.android.bluetooth || pidof com.google.android.bluetooth); " +
-            "[ -n \"\$p\" ] && logcat -d -v time --pid=\$p -t 3000 2>/dev/null", 8_000).out, System.currentTimeMillis() - STACK_LOG_MS)))
+            "[ -n \"\$p\" ] && logcat -d -v time --pid=\$p -t 20000 2>/dev/null | grep -v ' V/' | tail -n 6000", 10_000).out, System.currentTimeMillis() - STACK_LOG_MS)))
     }
 
     private const val STACK_LOG_MS = 150_000L
-    private val STACK_TAGS = Regex("(?i)smp|bond|pair|btif_dm|bt_btm|sec|gatt|l2c")
+    // What says something about a pairing, a bond, the link's security or an answer that could not be sent
+    private val STACK_WORDS = Regex("(?i)bond|pair|smp|auth|encrypt|\\bkey|consolidat|identity|cross|\\btemp|remov|eatt|sendResponse|send_?rsp|conn_id|GATT_(Dis)?[Cc]onnect|\\bsec_|out of sync|discard")
+    // Xiaomi's stack logs every scan filter and every table lookup: thousands of lines a minute that crowd the rest out
+    private val STACK_NOISE = Regex("ScanManager|onScanFilter|ScanFilter|BluetoothDatabase|getDeviceType|bta_av_co|found p_reg|Ignore unknown conn ID|not used by BTA|bta_gattc_hdl_event")
     private val STACK_LINE = Regex("""^(\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}) ([VDIWEF])/([^(]*)\(\s*\d+\): ?(.*)$""")
     private val HEX_RUN = Regex("""\b(?:0x)?[0-9a-fA-F]{12,}\b""")
     private val MASKED_MAC = Regex("""(?i)\b(?:xx:){2,5}[0-9a-f:]{2,11}\b""")
 
     /**
      * What Android's Bluetooth process logged since [since] (epoch ms), from [logcat] ("-v time" lines): its warnings
-     * and errors, and what it says about pairing, bonds, security and the control channel at any level. Scrubbed like
-     * every log that leaves the host, with long runs of hex (keys, addresses written without colons) and half-hidden
-     * addresses out as well, and no line that speaks of a name. The newest 150 lines, 200 characters each. Pure.
+     * and errors, and at lower levels what speaks of pairing, bonds, security or a lost answer; nothing of its most
+     * detailed level and none of the scan bookkeeping (a Poco's 150 newest lines were all of that, and the pairing's
+     * own second was not among them, 28 Nov 2026). Scrubbed like every log that leaves the host, with long runs of
+     * hex (keys, addresses written without colons) and half-hidden addresses out as well, and no line that speaks of
+     * a name. The first 140 and the last 60 lines when there are more, 200 characters each. Pure.
      */
     internal fun stackLog(logcat: String, since: Long, now: Long = System.currentTimeMillis()): List<String> {
         val f = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.ROOT)
         val from = f.format(java.util.Date(since)); val to = f.format(java.util.Date(now))
-        return logcat.lineSequence().mapNotNull { line ->
+        val kept = logcat.lineSequence().mapNotNull { line ->
             val m = STACK_LINE.find(line) ?: return@mapNotNull null
             val (time, level, tag, msg) = m.destructured
             // The log's dates carry no year: a window across New Year's midnight keeps nothing, which is the safe side
-            if (time < from || time > to) return@mapNotNull null
-            if (level !in "WEF" && !STACK_TAGS.containsMatchIn(tag) && !STACK_TAGS.containsMatchIn(msg)) return@mapNotNull null
+            if (time < from || time > to || level == "V") return@mapNotNull null
+            if (STACK_NOISE.containsMatchIn(tag) || STACK_NOISE.containsMatchIn(msg)) return@mapNotNull null
+            if (level !in "WEF" && !STACK_WORDS.containsMatchIn(tag) && !STACK_WORDS.containsMatchIn(msg)) return@mapNotNull null
             if (msg.contains("name", ignoreCase = true)) return@mapNotNull null
             "${time.substring(6)} $level ${tag.trim()}: ${MASKED_MAC.replace(HEX_RUN.replace(Scrub.text(msg), "<hex>"), "<mac>")}".take(200)
-        }.toList().takeLast(150)
+        }.toList()
+        return if (kept.size <= 200) kept else kept.take(140) + "... ${kept.size - 200} lines left out" + kept.takeLast(60)
     }
 
     /** The last ten minutes' steps, oldest first, each with how long ago ("-31.2 s phone A: ..."). */

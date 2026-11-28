@@ -214,7 +214,7 @@ object LinkRadio {
         if (first != "dump" && !first.startsWith("file ")) return@runCatching Record(emptyList(), "no answer")
         if (b64.length < 16) return@runCatching Record(emptyList(), if (first == "dump") "no record file, none in the dump" else "empty record file")
         val bytes = java.util.Base64.getDecoder().decode(b64.take(b64.length - b64.length % 4))
-        val (recs, how) = HciRing.read(if (first == "dump") HciRing.FILE_HEAD + bytes else bytes)
+        val (recs, how) = HciRing.read(if (first == "dump") HciRing.FILE_HEAD + bytes else bytes, oldUs = first == "dump" && HciRing.dumpInUs(bytes))
         val age = first.removePrefix("file ").trim().toLongOrNull() ?: 0
         val where = (if (first == "dump") "from the dump" else "from the file") + (if (how.isEmpty()) "" else ", $how") + (if (age > 5) ", written $age s ago" else "")
         if (recs.isEmpty()) return@runCatching Record(emptyList(), "record not readable (${HciRing.probe(if (first == "dump") HciRing.FILE_HEAD + bytes else bytes)}, $where)")

@@ -61,6 +61,7 @@ object HciPairing {
         val addresses = ArrayList<List<Int>>()
         val pending = HashMap<Pair<Int, Boolean>, Entry>()           // (link, asked by the phone) -> the request waiting
         val other = HashMap<Int, IntArray>()                         // data-channel packets per link: in, out
+        val enhanced = HashSet<Int>()                                // links on which enhanced control channels were opened
         var linkNo = 0
 
         fun letter(a: List<Int>): String {
@@ -77,7 +78,7 @@ object HciPairing {
         }
         fun secs(a: Long, b: Long) = "%.1f".format(java.util.Locale.ROOT, (b - a) / 1e6)
         fun close(h: Int, t: Long, how: String) {
-            for (fromPhone in booleanArrayOf(true, false)) pending.remove(h to fromPhone)?.let { if (it.waits()) it.outcome = "NO ANSWER: $how ${secs(it.last, t)} s later" }
+            for (slot in intArrayOf(h, h or 0x10000)) for (fromPhone in booleanArrayOf(true, false)) pending.remove(slot to fromPhone)?.let { if (it.waits()) it.outcome = "NO ANSWER: $how ${secs(it.last, t)} s later" }
         }
         fun authBits(a: Int) = listOfNotNull(if (a and 3 == 1) "bonding" else "no bonding", if (a and 4 != 0) "protected from a man in the middle" else null,
             if (a and 8 != 0) "secure connections" else "legacy pairing", if (a and 0x20 != 0) "CT2" else null).joinToString(", ")
@@ -133,7 +134,7 @@ object HciPairing {
                     close(h, r.t, "the link ended")
                     add(r.t, "", "${name(h)} down (${reason(r.u8(5))})")
                     other.remove(h)?.let { if (it[0] + it[1] > 0) add(r.t, "", "${name(h)}: ${it[0]} packets in and ${it[1]} out on data channels while it was up") }
-                    links.remove(h); classic.remove(h); peer.remove(h)
+                    links.remove(h); classic.remove(h); peer.remove(h); enhanced.remove(h)
                 }
                 0x04 -> add(r.t, "", "classic: ${letter((2..7).map(r::u8))} asks for a link")
                 0x03 -> {
@@ -171,21 +172,27 @@ object HciPairing {
                             0x0b -> add(r.t, "", "$l asks for security (${authBits(r.u8(9))})")
                         }
                     }
-                    4 -> att(r, h, code, who, ::name, ::add, pending)
+                    4 -> att(r, h, 0, who, ::name, ::add, pending)
                     5 -> when (code) {
                         0x14 -> add(r.t, "", "${name(h)}: $who opens a data channel (PSM ${hex(r.u16(12))})")
                         0x15 -> add(r.t, "", "${name(h)}: $who answers the data channel request")
-                        0x17 -> add(r.t, "", "${name(h)}: $who opens enhanced channels (PSM ${hex(r.u16(12))}${PSM[r.u16(12)]?.let { ": $it" }.orEmpty()})")
+                        0x17 -> { if (r.u16(12) == 0x27) enhanced += h
+                            add(r.t, "", "${name(h)}: $who opens enhanced channels (PSM ${hex(r.u16(12))}${PSM[r.u16(12)]?.let { ": $it" }.orEmpty()})") }
                         0x18 -> add(r.t, "", "${name(h)}: $who answers the enhanced channels request")
                         0x06 -> add(r.t, "", "${name(h)}: $who closes a data channel")
                         0x01 -> add(r.t, "", "${name(h)}: $who rejects a signalling command")
                     }
                     1 -> if (code == 0x02) add(r.t, "", "${name(h)}: $who opens PSM ${hex(r.u16(12))}${PSM[r.u16(12)]?.let { " ($it)" }.orEmpty()}")
-                    else -> if (cid >= 0x40 && r.t >= from) other.getOrPut(h) { IntArray(2) }[if (r.fromChip) 0 else 1]++
+                    // An enhanced control channel carries the same requests behind a two-byte length: a packet that is
+                    // exactly that long on a link where such channels were opened is read as one
+                    else -> if (cid >= 0x40) {
+                        if (h in enhanced && r.d.size >= 11 && r.u16(8) + 2 == r.u16(4)) att(r, h, 2, who, ::name, ::add, pending)
+                        else if (r.t >= from) other.getOrPut(h) { IntArray(2) }[if (r.fromChip) 0 else 1]++
+                    }
                 }
             }
         }
-        for ((k, e) in pending) if (e.waits()) e.outcome = "NO ANSWER in the ${secs(e.last, end)} s the record goes on" + if (k.first !in links) "" else " (link still up)"
+        for ((k, e) in pending) if (e.waits()) e.outcome = "NO ANSWER in the ${secs(e.last, end)} s the record goes on" + if (k.first and 0xffff !in links) "" else " (link still up)"
         for ((h, n) in other) if (n[0] + n[1] > 0) out += Entry(end, "", "${name(h)}: ${n[0]} packets in and ${n[1]} out on data channels so far")
         // The same line again and again (a keep-alive written and answered every minute) is its first one and a count
         val text = ArrayList<String>()
@@ -204,36 +211,44 @@ object HciPairing {
 
     /**
      * One packet on the control channel (ATT). A request becomes a line and waits in [pending] for its answer, which
-     * becomes that line's outcome; reading the table of services is many requests and one line.
+     * becomes that line's outcome; reading the table of services is many requests and one line. [off]: 0 on the
+     * control channel itself, 2 on an enhanced one (the packet starts with its length); those are told apart in the
+     * line, and their requests wait apart from the plain channel's (all enhanced channels of a link together: which
+     * one a packet came on is not told the same way in both directions).
      */
-    private fun att(r: HciRing.Rec, h: Int, op: Int, who: String, name: (Int) -> String, add: (Long, String, String) -> Entry?,
+    private fun att(r: HciRing.Rec, h: Int, off: Int, who: String, name: (Int) -> String, add: (Long, String, String) -> Entry?,
                     pending: HashMap<Pair<Int, Boolean>, Entry>) {
-        val l = "${name(h)}: $who"
-        val at = r.u16(9)
+        val op = r.u8(8 + off)
+        val slot = if (off == 0) h else h or 0x10000
+        val l = "${name(h)}${if (off == 0) "" else " (enhanced channel)"}: $who"
+        val at = r.u16(9 + off)
         fun ask(key: String, text: String) {
-            val k = h to r.fromChip
+            val k = slot to r.fromChip
             val before = pending[k]
             val e = add(r.t, key, text)
             if (before != null && before !== e && before.waits()) before.outcome = "NO ANSWER before the next request"
             if (e != null) pending[k] = e else pending.remove(k)
         }
         fun answer(text: String, counts: Boolean = true) {
-            val e = pending[h to !r.fromChip]
+            val e = pending[slot to !r.fromChip]
             if (e == null) { add(r.t, "", "$l answers an earlier request: $text"); return }
             if (e.key.startsWith("table:")) { if (counts) e.answers++ } else e.outcome = text
-            if (!e.key.startsWith("table:")) pending.remove(h to !r.fromChip)
+            if (!e.key.startsWith("table:")) pending.remove(slot to !r.fromChip)
         }
         when (op) {
             0x01 -> {
-                val asked = r.u8(9); val err = r.u8(12)
-                val e = pending[h to !r.fromChip]
+                val asked = r.u8(9 + off)
+                // On an enhanced channel the record's 14 bytes end before the error's code
+                val err = if (12 + off < r.d.size) r.u8(12 + off) else -1
+                val why = if (err < 0) "the record cuts the reason off" else "${ATT_ERR[err] ?: "error"}, ${hex(err)}"
+                val e = pending[slot to !r.fromChip]
                 // The table's end is told by "attribute not found": an answer like any other
-                if (e != null && e.key.startsWith("table:") && asked in DISCOVERY && err == 0x0a) e.answers++
-                else if (e != null && e.key.startsWith("table:")) { e.answers++; add(r.t, "", "$l refuses a table request (${ATT_ERR[err] ?: "error"}, ${hex(err)})") }
-                else answer("REFUSED (${ATT_ERR[err] ?: "error"}, ${hex(err)})")
+                if (e != null && e.key.startsWith("table:") && asked in DISCOVERY && (err == 0x0a || err < 0)) e.answers++
+                else if (e != null && e.key.startsWith("table:")) { e.answers++; add(r.t, "", "$l refuses a table request ($why)") }
+                else answer("REFUSED ($why)")
             }
             0x02 -> ask("", "$l asks for the packet size")
-            0x04, 0x06, 0x08, 0x10 -> ask("table:$h:${r.fromChip}", "$l reads the table of services")
+            0x04, 0x06, 0x08, 0x10 -> ask("table:$slot:${r.fromChip}", "$l reads the table of services")
             0x0a, 0x0c -> ask("", "$l reads $at")
             0x0e, 0x20 -> ask("", "$l reads several values")
             0x12 -> ask("", "$l writes to $at")
@@ -242,8 +257,8 @@ object HciPairing {
             0x1d -> ask("", "$l indicates on $at")
             0x03, 0x05, 0x07, 0x09, 0x11, 0x0b, 0x0d, 0x0f, 0x21, 0x13, 0x17, 0x19 -> answer("answered")
             0x1e -> answer("confirmed")
-            0x52, 0xd2 -> add(r.t, "cmd:$h:${r.fromChip}:$at", "$l writes to $at without asking for an answer")
-            0x1b, 0x23 -> add(r.t, "note:$h:${r.fromChip}:$at", "$l notifies on $at")
+            0x52, 0xd2 -> add(r.t, "cmd:$slot:${r.fromChip}:$at", "$l writes to $at without asking for an answer")
+            0x1b, 0x23 -> add(r.t, "note:$slot:${r.fromChip}:$at", "$l notifies on $at")
         }
     }
 }

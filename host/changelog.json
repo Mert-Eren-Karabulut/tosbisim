@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.12.41",
+    "code": 77,
+    "en": "The report about a pairing that doesn't complete now holds what it was made for on Xiaomi phones too. The first such report, from a Poco X3 NFC, came without the Bluetooth chip's record: the phone counts that record's time in millionths of a second, the host read thousandths, and \"the last two minutes\" became a tenth of a second.\nThe record is now read with the right clock. It also shows the requests a phone sends on the newer \"enhanced\" control channels, and the Bluetooth log that comes with it keeps the lines about the pairing instead of the phone's scan bookkeeping.",
+    "tr": "Tamamlanmayan eşleştirme raporu artık Xiaomi telefonlarda da içermesi gerekeni içeriyor. Bir Poco X3 NFC'den gelen ilk rapor Bluetooth çipinin kaydı olmadan geldi: telefon bu kaydın zamanını saniyenin milyonda biri olarak sayıyor, ana cihaz ise binde biri olarak okudu ve \"son iki dakika\" saniyenin onda birine dönüştü.\nKayıt artık doğru saatle okunuyor. Ayrıca telefonun yeni \"gelişmiş\" kontrol kanallarından gönderdiği istekleri de gösteriyor; raporla gelen Bluetooth kaydı da telefonun tarama kayıtları yerine eşleştirmeyle ilgili satırları tutuyor."
+  },
+  {
     "version": "0.12.40",
     "code": 76,
     "en": "A pairing that the host accepts but that never completes now reports itself. On a Poco X3 NFC with MIUI 14 the host accepted a Galaxy S25 Ultra's pairing every time and the phone still stayed at \"connecting\": its first message never reached the host, and neither app's log said what the phone's Bluetooth did.\nWhen the host has accepted a pairing and the phone has not said hello within 30 seconds, the host now sends an automatic report with the steps of that pairing as Android told them and with its Bluetooth chip's own record of those seconds: which side started what, whether a pairing failed and why, and which requests got no answer. A report sent by hand from the pairing screen carries the same. The report holds no Bluetooth address, no key and nothing that was written or read.",
