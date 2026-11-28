@@ -248,6 +248,12 @@ object Retire {
             |usable() { [ -n "${'$'}1" ] && [ "${'$'}1" != null ] && [ "${'$'}1" != "${'$'}PKG" ] && pm path "${'$'}1" >/dev/null 2>&1; }
             |{
             |echo "${'$'}(date) giving the phone back"
+            |# The Bluetooth stack's enhanced-channels switch, if the host turned it off (BtStackFix): back to what it was
+            |if [ -f ${BtStackFix.MARK} ]; then
+            |  if [ "${'$'}(cat ${BtStackFix.MARK})" = unset ]; then resetprop -p --delete ${BtStackFix.PROP} 2>/dev/null || setprop ${BtStackFix.PROP} true
+            |  else setprop ${BtStackFix.PROP} "${'$'}(cat ${BtStackFix.MARK})"; fi
+            |  rm -f ${BtStackFix.MARK}
+            |fi
             |# First, the phone is marked given back: an app that starts again stays no host (Retire.givenBack) until it
             |# is gone. A boot script checks at every boot; once the app is gone it drops the mark, the log and itself.
             |settings put global ${Mark.KEY} "${'$'}(settings get global boot_count)"

@@ -264,3 +264,13 @@ class HciPairingSecondRoundTest {
         assertTrue(l.none { "ScanManager" in it || "found p_reg" in it })
     }
 }
+
+class BtStackFixTest {
+    @Test fun onlyWhereTheStackHasTheSwitchAndBreaks() {
+        assertTrue(BtStackFix.needed("/system_ext/lib64/libbluetooth_qti.so", "", 31))        // never set: on by default
+        assertTrue(BtStackFix.needed("/system/lib64/libbluetooth.so", "true", 30))
+        assertFalse(BtStackFix.needed("/system_ext/lib64/libbluetooth_qti.so", "false", 31))  // off already
+        assertFalse(BtStackFix.needed("", "", 31))                                            // another stack: nothing reads it
+        assertFalse(BtStackFix.needed("/system_ext/lib64/libbluetooth_qti.so", "", 33))       // Android 13 pairs as it is
+    }
+}

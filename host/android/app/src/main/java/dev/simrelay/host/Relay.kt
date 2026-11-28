@@ -174,6 +174,9 @@ object Relay {
             SmsStore.pending(app).filter { it.receivedMs > recent }.forEach(Push::sms)
         }
         Log.i(TAG, "relay up; pinned client=${pinned() ?: "none"}")
+        // A Bluetooth stack that goes deaf to a newer Android phone right after pairing gets its switch ([BtStackFix])
+        Thread({ BtStackFix.apply(app, unpaired = { pinned() == null }, busy = { (::ble.isInitialized && ble.connectedDevices().isNotEmpty()) || CallRegistry.anyCall() }) }, "bt-stack-fix")
+            .apply { isDaemon = true }.start()
     }
 
     /** For the setup screen: paired client model (null = not paired), connected now, pairing window open. */
