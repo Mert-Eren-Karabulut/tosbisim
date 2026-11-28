@@ -25,6 +25,23 @@ until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 2; done
   # Our logs must show: MediaTek ROMs set log.tag=M, which hides app logs (Redmi Note 8 Pro, 18 Oct).
   setprop log.tag.SimRelayHost I; setprop log.tag.simrelayd I
 
+  # Android 17 runs privileged apps that target an older Android in a SELinux domain of their own (priv_app_36; the
+  # phone's app policy names it), which neither the root manager's rules nor this module's sepolicy.rule know: the host
+  # app reached neither su nor simrelayd ("Cannot connect to daemon: Permission denied", "avc: denied { connectto } ...
+  # scontext=u:r:priv_app_36"; a Poco X3 NFC on an Android 17 ROM, 27-28 Nov 2026, and stock Android 17 has the same
+  # line). Whatever domains this phone gives privileged apps get what priv_app has, here and now: the rule file itself
+  # is only read where the root manager has its early-boot partition.
+  POL=$(command -v magiskpolicy 2>/dev/null); [ -n "$POL" ] || { [ -x /data/adb/ap/bin/magiskpolicy ] && POL=/data/adb/ap/bin/magiskpolicy; }
+  if [ -n "$POL" ]; then
+    for d in $(grep -ho 'domain=priv_app[_0-9a-z]*' /system/etc/selinux/plat_seapp_contexts /system_ext/etc/selinux/*seapp_contexts \
+               /product/etc/selinux/*seapp_contexts /vendor/etc/selinux/*seapp_contexts 2>/dev/null | sed 's/^domain=//' | sort -u); do
+      [ "$d" = priv_app ] && continue
+      # (one class covers stream and sequenced-packet sockets: the daemon's control and audio sockets both)
+      "$POL" --live "allow $d magisk unix_stream_socket { connectto read write getattr getopt setopt }" >/dev/null 2>&1 \
+        && echo "privileged apps in $d may reach root and the daemon" || echo "WARNING: no rule for privileged apps in $d"
+    done
+  fi
+
   # What the phone had before TosbiSim changed anything, once: the host app's "Stop using this phone as a host" puts it
   # back. A phone that already ran this script has only TosbiSim's values left, so it records none (Android's defaults
   # are used then).

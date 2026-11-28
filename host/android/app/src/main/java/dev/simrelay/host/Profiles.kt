@@ -262,9 +262,26 @@ object AutoProfile {
             "inject":{"pcm":$pcm,"rate":48000,"channels":2,"route_by_session":{"1":${JSONObject.quote(inj1)},"2":${JSONObject.quote(inj2)}}},
             "mute":{"tx":"Voice Tx Device Mute","rx":"Voice Rx Device Mute","vsid":4294967295,"ramp_ms":20}}""")
         if (vendor == null) json.put("route_from", "sound card")      // for the report: the vendor's files named none
+        val quiet = hostVolumes(has)
+        if (quiet.isNotEmpty()) json.put("call_controls", JSONObject().apply { quiet.forEach { put(it, 0) } })
         return Profile(json.getString("id"), json, "auto") to
-            "inject PCM $pcm, routes '$inj1' / '$inj2'" + if (vendor == null) " (from the sound card: the vendor paths name none)" else ""
+            "inject PCM $pcm, routes '$inj1' / '$inj2'" + (if (vendor == null) " (from the sound card: the vendor paths name none)" else "") +
+                if (quiet.isEmpty()) "" else ", ${quiet.size} host volume controls held at 0 in a call"
     }
+
+    /**
+     * The codec's own playback volumes on this card (earpiece, headphones, speaker), to hold at nothing while the
+     * phone's call runs. "Voice Rx Device Mute" silences the caller's voice on the host, but not what Android itself
+     * plays into the call's earpiece: on a network that sends no ringing tone of its own, Android's phone service
+     * plays one there for as long as the far end rings, and a host on a desk was heard ringing through every outgoing
+     * call (a Poco X3 NFC, 28 Nov 2026; Telecom's own record: STOP_RINGBACK at the call's end). Neither the caller's
+     * audio the host captures nor what it injects passes these volumes: both are taken and given inside the modem's
+     * voice path. Names as Qualcomm's codecs have them: RX_RXn (the newer "bolero" codec macros), RXn (WCD9335/934x
+     * and the SoCs' internal codecs), WSA_RXn (the smart speaker amplifiers), each with its "Mix" twin.
+     */
+    internal fun hostVolumes(has: (String) -> Boolean): List<String> =
+        ((0..2).map { "RX_RX$it" } + (0..8).map { "RX$it" } + (0..1).map { "WSA_RX$it" })
+            .flatMap { listOf("$it Digital Volume", "$it Mix Digital Volume") }.filter(has).take(24)
 }
 
 /**

@@ -68,4 +68,20 @@ class AutoProfileTest {
         assertNull(build(none, card = sagit - "Incall_Music_2 Audio Mixer MultiMedia2").first)
         assertNull(build(none, card = sagit - "MultiMedia1 Mixer VOC_REC_DL").first)
     }
+
+    @Test fun theHostsOwnVolumesAreHeldSilentInACall() {
+        // A Poco X3 NFC's codec: three playback volumes and their mix twins; no call control where the card has none
+        val poco = sagit + setOf("RX_RX0 Digital Volume", "RX_RX1 Digital Volume", "RX_RX2 Digital Volume", "RX_RX0 Mix Digital Volume",
+            "RX_RX1 Mix Digital Volume", "RX_RX2 Mix Digital Volume", "EAR PA GAIN")
+        val (p, said) = build(listOf(stockPaths), card = poco)
+        val cc = p!!.json.getJSONObject("call_controls")
+        assertEquals(6, cc.length())
+        assertEquals(0, cc.getInt("RX_RX0 Digital Volume")); assertEquals(0, cc.getInt("RX_RX2 Mix Digital Volume"))
+        assertTrue(said, said.endsWith(", 6 host volume controls held at 0 in a call"))
+        // They go to the daemon as controls of the call, and count among the controls the profile needs on the card
+        assertTrue(p.daemonSetLines().contains("SET call RX_RX0 Digital Volume=0"))
+        assertTrue("RX_RX1 Digital Volume" in p.controlNames())
+        val (plain, _) = build(listOf(stockPaths), card = sagit - sagit.filter { "Digital Volume" in it }.toSet())
+        assertFalse(plain!!.json.has("call_controls"))
+    }
 }
